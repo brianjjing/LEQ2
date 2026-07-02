@@ -29,9 +29,32 @@ print("DISALLOW TRANSFERS")
 
 from dynamics.termination_fns import get_termination_fn
 import wrappers
+import gym as _gym_compat
+
+class GymnasiumToGymWrapper(_gym_compat.Wrapper):
+    """Converts Gymnasium-style API to old Gym API expected by LEQ wrappers.
+    Gymnasium: reset() -> (obs, info), step() -> (obs, reward, terminated, truncated, info)
+    Old Gym:   reset() -> obs,         step() -> (obs, reward, done, info)
+    """
+    def reset(self, **kwargs):
+        result = self.env.reset(**kwargs)
+        if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], dict):
+            return result[0]
+        return result
+
+    def step(self, action):
+        result = self.env.step(action)
+        if len(result) == 5:
+            obs, reward, terminated, truncated, info = result
+            done = bool(terminated or truncated)
+            if "episode" not in info:
+                info["episode"] = {}
+            return obs, reward, done, info
+        return result
 from dataset_utils import (
     D4RLDataset,
     NeoRLDataset,
+    AbiomedDataset,
     split_into_trajectories,
     ReplayBuffer,
 )
@@ -44,6 +67,7 @@ FLAGS = flags.FLAGS
 
 flags.DEFINE_string("env_name", "antmaze-medium-play-v0", "Environment name.")
 flags.DEFINE_string("load_dir", None, "Dynamics model load dir")
+flags.DEFINE_string("dataset_path", None, "Path to .npz dataset file for custom envs like abiomed")
 flags.DEFINE_string("save_dir", "./tmp/EP/", "Tensorboard logging dir.")
 flags.DEFINE_string("wandb_key", "", "Wandb key")
 flags.DEFINE_string("dynamics", "torch", "Dynamics model")
@@ -111,7 +135,24 @@ def normalize(dataset):
 def make_env_and_dataset(env_name, seed, discount, model=None):
 
     is_neorl = env_name.split("-")[1] == "v3"
-    if is_neorl:
+    is_abiomed = "abiomed" in env_name
+    if is_abiomed:
+        import sys as _sys
+        _sys.path.insert(0, "/home/brian/repos/GORMPO_abiomed/abiomed_env")
+        from rl_env import AbiomedRLEnvFactory
+        env = AbiomedRLEnvFactory.create_env(
+            model_name="10min_1hr_all_data",
+            action_space_type="continuous",
+            reward_type="smooth",
+            normalize_rewards=True,
+            seed=seed,
+            device="cuda:0",
+        )
+        env = GymnasiumToGymWrapper(env)
+        assert FLAGS.dataset_path is not None, "Must provide --dataset_path for abiomed env"
+        dataset = AbiomedDataset(FLAGS.dataset_path, discount)
+        raw_dataset = None
+    elif is_neorl:
         import neorl
         import gym
 
@@ -171,7 +212,7 @@ def main(_):
     kwargs = dict(FLAGS.config)
 
     print(FLAGS.flag_values_dict())
-    if FLAGS.debug is False:
+    if FLAGS.debug is False and FLAGS.wandb_key:
         wandb.login(key=FLAGS.wandb_key)
         run = wandb.init(
             # Set the project where this run will be logged
@@ -204,6 +245,18 @@ def main(_):
 
             task, version, data_type = tuple(FLAGS.env_name.split("-"))
             env = neorl.make(task + "-" + version)
+        elif "abiomed" in FLAGS.env_name:
+            import sys as _sys
+            _sys.path.insert(0, "/home/brian/repos/GORMPO_abiomed/abiomed_env")
+            from rl_env import AbiomedRLEnvFactory
+            env = AbiomedRLEnvFactory.create_env(
+                model_name="10min_1hr_all_data",
+                action_space_type="continuous",
+                reward_type="smooth",
+                normalize_rewards=True,
+                seed=FLAGS.seed,
+                device="cuda:0",
+            )
         else:
             import d4rl
             import d4rl_ext
@@ -242,7 +295,25 @@ def main(_):
     else:
         assert False, "Dynamics not given"
 
-    if FLAGS.env_name.split("-")[1] == "v3":
+    if "abiomed" in FLAGS.env_name:
+        import sys as _sys
+        _sys.path.insert(0, "/home/brian/repos/GORMPO_abiomed/abiomed_env")
+        from rl_env import AbiomedRLEnvFactory
+        eval_envs = []
+        for i in range(FLAGS.eval_episodes):
+            eval_env = AbiomedRLEnvFactory.create_env(
+                model_name="10min_1hr_all_data",
+                action_space_type="continuous",
+                reward_type="smooth",
+                normalize_rewards=True,
+                seed=FLAGS.seed + i,
+                device="cuda:0",
+            )
+            eval_env = GymnasiumToGymWrapper(eval_env)
+            eval_env = wrappers.EpisodeMonitor(eval_env)
+            eval_env = wrappers.SinglePrecision(eval_env)
+            eval_envs.append(eval_env)
+    elif FLAGS.env_name.split("-")[1] == "v3":
         # NeoRL
         name, version, _ = FLAGS.env_name.split("-")
         env_name = name + "-" + version
@@ -259,6 +330,7 @@ def main(_):
             eval_envs.append(env)
     else:
         # D4RL
+        import gym
         eval_envs = []
         for i in range(FLAGS.eval_episodes):
             env = gym.make(FLAGS.env_name)
@@ -413,8 +485,10 @@ def main(_):
         )
         score.append(eval_stats["return"])
         length.append(eval_stats["length"])
-    run.log({f"evaluation/final_score": np.mean(score)}, step=1000000)
-    run.log({f"evaluation/final_length": np.mean(length)}, step=1000000)
+    print("Final score:", np.mean(score), "Final length:", np.mean(length))
+    if run is not None:
+        run.log({f"evaluation/final_score": np.mean(score)}, step=1000000)
+        run.log({f"evaluation/final_length": np.mean(length)}, step=1000000)
 
 
 if __name__ == "__main__":

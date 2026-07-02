@@ -217,8 +217,15 @@ def termination_fn_dmc(obs, act, next_obs):
     return done
 
 
+def termination_fn_abiomed(obs, act, next_obs):
+    done = jnp.array([False] * obs.shape[0])
+    done = done[:, None]
+    return done
+
 def get_termination_fn(task):
-    if "dmc" in task:
+    if "abiomed" in task:
+        return termination_fn_abiomed
+    elif "dmc" in task:
         return termination_fn_dmc
     elif "halfcheetahvel" in task:
         return termination_fn_halfcheetahveljump
