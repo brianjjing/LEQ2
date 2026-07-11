@@ -1,0 +1,15 @@
+{"time":"2026-07-09T01:53:32.320890292Z","level":"INFO","msg":"stream: starting","core version":"0.19.11","symlink path":"/home/brian/repos/LEQ2/wandb/offline-run-20260709_015332-mkl2wpdk/logs/debug-core.log"}
+{"time":"2026-07-09T01:53:32.633152357Z","level":"WARN","msg":"GraphQL client is nil, skipping feature loading"}
+{"time":"2026-07-09T01:53:32.633922554Z","level":"INFO","msg":"created new stream","id":"mkl2wpdk"}
+{"time":"2026-07-09T01:53:32.633984751Z","level":"INFO","msg":"stream: started","id":"mkl2wpdk"}
+{"time":"2026-07-09T01:53:32.63406443Z","level":"INFO","msg":"writer: Do: started","stream_id":"mkl2wpdk"}
+{"time":"2026-07-09T01:53:32.634293741Z","level":"INFO","msg":"sender: started","stream_id":"mkl2wpdk"}
+{"time":"2026-07-09T01:53:32.63435716Z","level":"INFO","msg":"handler: started","stream_id":"mkl2wpdk"}
+{"time":"2026-07-09T01:53:32.643615553Z","level":"INFO","msg":"Starting system monitor"}
+{"time":"2026-07-09T04:04:15.888072575Z","level":"INFO","msg":"stream: closing","id":"mkl2wpdk"}
+{"time":"2026-07-09T04:04:15.888126346Z","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2026-07-09T04:04:15.88824512Z","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2026-07-09T04:04:15.888413938Z","level":"INFO","msg":"handler: closed","stream_id":"mkl2wpdk"}
+{"time":"2026-07-09T04:04:15.888457219Z","level":"INFO","msg":"writer: Close: closed","stream_id":"mkl2wpdk"}
+{"time":"2026-07-09T04:04:15.888510259Z","level":"INFO","msg":"sender: closed","stream_id":"mkl2wpdk"}
+{"time":"2026-07-09T04:04:15.888611009Z","level":"INFO","msg":"stream: closed","id":"mkl2wpdk"}

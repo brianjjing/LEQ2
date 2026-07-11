@@ -12,6 +12,7 @@ os.environ["NUM_INTER_THREADS"] = "1"
 
 import cv2
 import numpy as np
+import torch
 import tqdm
 from absl import app, flags
 from ml_collections import config_flags
@@ -30,6 +31,7 @@ print("DISALLOW TRANSFERS")
 from dynamics.termination_fns import get_termination_fn
 import wrappers
 from dataset_utils import (
+    AbiomedDataset,
     D4RLDataset,
     NeoRLDataset,
     split_into_trajectories,
@@ -47,6 +49,9 @@ flags.DEFINE_string("load_dir", None, "Dynamics model load dir")
 flags.DEFINE_string("save_dir", "./tmp/EP/", "Tensorboard logging dir.")
 flags.DEFINE_string("wandb_key", "", "Wandb key")
 flags.DEFINE_string("dynamics", "torch", "Dynamics model")
+flags.DEFINE_string("dataset_path", None, "Path to offline dataset .npz (MCS/Abiomed only)")
+flags.DEFINE_string("guardian_model_name", None, "Path to a trained density model for OOD penalty")
+flags.DEFINE_float("guardian_penalty_coef", 0.5, "OOD penalty coefficient λ")
 flags.DEFINE_integer("seed", 42, "Random seed.")
 flags.DEFINE_integer("eval_episodes", 10, "Number of episodes used for evaluation.")
 flags.DEFINE_integer("num_layers", 3, "number of hidden layers")
@@ -109,46 +114,57 @@ def normalize(dataset):
 
 
 def make_env_and_dataset(env_name, seed, discount, model=None):
+    import gym
 
     is_neorl = env_name.split("-")[1] == "v3"
-    if is_neorl:
+    is_abiomed = env_name == "abiomed-v0"
+
+    if is_abiomed:
+        import sys as _sys
+        _GORMPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../GORMPO_abiomed"))
+        if _GORMPO not in _sys.path:
+            _sys.path.insert(0, _GORMPO)
+        from abiomed_env.rl_env import AbiomedRLEnvFactory
+        assert FLAGS.dataset_path is not None, \
+            "MCS requires --dataset_path pointing to a .npz offline dataset"
+        env = AbiomedRLEnvFactory.create_env(seed=seed, action_space_type="continuous")
+        dataset = AbiomedDataset(FLAGS.dataset_path, discount)
+        raw_dataset = None
+        reward_scale, reward_bias = 1.0, 0.0
+    elif is_neorl:
         import neorl
-        import gym
 
         task, version, data_type = tuple(env_name.split("-"))
         env = neorl.make(task + "-" + version)
         dataset = NeoRLDataset(env, data_type, discount)
         raw_dataset = None
+        reward_scale, reward_bias = 1.0, 0.0
     else:
         import d4rl
         import d4rl_ext
-        import gym
 
         env = gym.make(env_name)
         dataset = D4RLDataset(env, discount)
         raw_dataset = env.get_dataset()
-    env = wrappers.EpisodeMonitor(env)
-    env = wrappers.SinglePrecision(env)
-    env.seed(seed)
-    env.action_space.seed(seed)
-    env.observation_space.seed(seed)
-
-    env_name = FLAGS.env_name.lower()
-    if "antmaze" in env_name:
-        # Following IQL, subtract 1.0 from rewards
-        dataset.rewards -= 1.0
-        reward_scale, reward_bias = 1.0, -1.0
-
-    elif "halfcheetah" in env_name or "walker2d" in env_name or "hopper" in env_name:
-        if "random" in env_name:
-            # For random datasets, use the original rewards
-            # Because random trajectory is too bad, has low std.
-            reward_scale, reward_bias = 1.0, 0.0
+        env_lower = env_name.lower()
+        if "antmaze" in env_lower:
+            dataset.rewards -= 1.0
+            reward_scale, reward_bias = 1.0, -1.0
+        elif "halfcheetah" in env_lower or "walker2d" in env_lower or "hopper" in env_lower:
+            if "random" in env_lower:
+                reward_scale, reward_bias = 1.0, 0.0
+            else:
+                reward_scale, reward_bias = normalize(dataset)
         else:
-            # Otherwise, normalize the rewards same as IQL.
-            reward_scale, reward_bias = normalize(dataset)
-    else:
-        reward_scale, reward_bias = 1.0, 0.0
+            reward_scale, reward_bias = 1.0, 0.0
+
+    if not is_abiomed:
+        env = wrappers.EpisodeMonitor(env)
+        env = wrappers.SinglePrecision(env)
+        env.seed(seed)
+        env.action_space.seed(seed)
+        env.observation_space.seed(seed)
+
     print("Reward scaler", reward_scale, reward_bias)
     return env, raw_dataset, dataset, (reward_scale, reward_bias)
 
@@ -167,6 +183,7 @@ def get_normalized_score_neorl(x, env_name):
 
 
 def main(_):
+    import gym  # ensure 'gym' is always bound as a local, regardless of branch taken below
     os.makedirs(FLAGS.save_dir, exist_ok=True)
     kwargs = dict(FLAGS.config)
 
@@ -191,7 +208,14 @@ def main(_):
     else:
         run = None
 
-    if "dmc" in FLAGS.env_name:
+    if FLAGS.env_name == "abiomed-v0":
+        assert FLAGS.dataset_path is not None, \
+            "abiomed-v0 requires --dataset_path pointing to a .npz offline dataset"
+        _data = np.load(FLAGS.dataset_path)
+        obs_dim    = _data["observations"].shape[1]
+        action_dim = _data["actions"].shape[1]
+        env = None  # will be set in make_env_and_dataset below
+    elif "dmc" in FLAGS.env_name:
         import gym
 
         _, task, diff = FLAGS.env_name.split("-")
@@ -212,22 +236,23 @@ def main(_):
             env = gym.make(FLAGS.env_name)
 
     if FLAGS.dynamics == "torch":
-        obs_dim, action_dim = (
-            env.observation_space.shape[-1],
-            env.action_space.shape[-1],
-        )
+        if FLAGS.env_name != "abiomed-v0":
+            obs_dim, action_dim = (
+                env.observation_space.shape[-1],
+                env.action_space.shape[-1],
+            )
         print(obs_dim, action_dim)
         termination_fn = get_termination_fn(task=FLAGS.env_name)
         if 1 <= FLAGS.seed and FLAGS.seed <= 5:
             print("TESTING SEEDS!")
             model_path = os.path.join(
-                "../OfflineRL-Kit/models/dynamics-ensemble/",
+                "../OfflineRL-Kit2/models/dynamics-ensemble/",
                 str(FLAGS.seed),
                 FLAGS.env_name,
             )
         else:
             model_path = os.path.join(
-                "../OfflineRL-Kit/models/dynamics-ensemble/", str(1), FLAGS.env_name
+                "../OfflineRL-Kit2/models/dynamics-ensemble/", str(FLAGS.seed), FLAGS.env_name
             )
         from dynamics.ensemble_model_learner import get_world_model
 
@@ -242,7 +267,58 @@ def main(_):
     else:
         assert False, "Dynamics not given"
 
-    if FLAGS.env_name.split("-")[1] == "v3":
+    # Load optional density-based guardian for OOD rollout penalty
+    guardian = None
+    if FLAGS.guardian_model_name:
+        import sys as _sys
+        _GORMPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../GORMPO_abiomed/cormpo"))
+        if _GORMPO not in _sys.path:
+            _sys.path.insert(0, _GORMPO)
+        # LEQ2 has a flat common.py cached in sys.modules. kde.py needs
+        # cormpo's common/ package (now has __init__.py). Pop the cached
+        # flat module so Python re-searches sys.path and finds the package.
+        _common_bak = _sys.modules.pop("common", None)
+        _common_buffer_bak = _sys.modules.pop("common.buffer", None)
+        from mbpo_kde.kde import PercentileThresholdKDE
+        if _common_bak is not None:
+            _sys.modules["common"] = _common_bak
+        if _common_buffer_bak is not None:
+            _sys.modules["common.buffer"] = _common_buffer_bak
+        guardian = PercentileThresholdKDE.load_model(
+            FLAGS.guardian_model_name, use_gpu=torch.cuda.is_available(), devid=0
+        )
+        print(f"Loaded guardian from {FLAGS.guardian_model_name} (thr={guardian['thr']:.4f})")
+
+    if FLAGS.env_name == "abiomed-v0":
+        import sys as _sys
+        _GORMPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../GORMPO_abiomed"))
+        if _GORMPO not in _sys.path:
+            _sys.path.insert(0, _GORMPO)
+        from abiomed_env.rl_env import AbiomedRLEnvFactory
+
+        class _GymCompat(gym.Wrapper):
+            """Adapt new Gymnasium API (reset→(obs,info), step→5-tuple) to
+            the old Gym API (reset→obs, step→4-tuple) that LEQ2 evaluation expects."""
+            def reset(self, **kwargs):
+                result = self.env.reset(**kwargs)
+                return result[0] if isinstance(result, tuple) else result
+            def step(self, action):
+                result = self.env.step(action)
+                if len(result) == 5:
+                    obs, reward, terminated, truncated, info = result
+                    return obs, reward, terminated or truncated, info
+                return result
+
+        eval_envs = []
+        for i in range(FLAGS.eval_episodes):
+            e = AbiomedRLEnvFactory.create_env(
+                seed=FLAGS.seed + i, action_space_type="continuous"
+            )
+            e = _GymCompat(e)
+            e = wrappers.EpisodeMonitor(e)
+            e = wrappers.SinglePrecision(e)
+            eval_envs.append(e)
+    elif FLAGS.env_name.split("-")[1] == "v3":
         # NeoRL
         name, version, _ = FLAGS.env_name.split("-")
         env_name = name + "-" + version
@@ -293,7 +369,8 @@ def main(_):
         actor_update=FLAGS.actor_update,
         critic_update=FLAGS.critic_update,
         maintain_model=FLAGS.maintain_model,
-        # sac_alpha=FLAGS.sac_alpha,
+        guardian=guardian,
+        guardian_penalty_coef=FLAGS.guardian_penalty_coef,
         **kwargs,
     )
 
@@ -413,8 +490,12 @@ def main(_):
         )
         score.append(eval_stats["return"])
         length.append(eval_stats["length"])
-    run.log({f"evaluation/final_score": np.mean(score)}, step=1000000)
-    run.log({f"evaluation/final_length": np.mean(length)}, step=1000000)
+    if run is not None:
+        run.log({f"evaluation/final_score": np.mean(score)}, step=1000000)
+        run.log({f"evaluation/final_length": np.mean(length)}, step=1000000)
+    else:
+        print(f"final_score:  {np.mean(score):.2f}")
+        print(f"final_length: {np.mean(length):.1f}")
 
 
 if __name__ == "__main__":

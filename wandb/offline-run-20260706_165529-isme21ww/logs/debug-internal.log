@@ -1,0 +1,15 @@
+{"time":"2026-07-06T16:55:29.871385206Z","level":"INFO","msg":"stream: starting","core version":"0.19.11","symlink path":"/home/brian/repos/LEQ2/wandb/offline-run-20260706_165529-isme21ww/logs/debug-core.log"}
+{"time":"2026-07-06T16:55:30.193352684Z","level":"WARN","msg":"GraphQL client is nil, skipping feature loading"}
+{"time":"2026-07-06T16:55:30.193901668Z","level":"INFO","msg":"created new stream","id":"isme21ww"}
+{"time":"2026-07-06T16:55:30.194017777Z","level":"INFO","msg":"stream: started","id":"isme21ww"}
+{"time":"2026-07-06T16:55:30.194092347Z","level":"INFO","msg":"writer: Do: started","stream_id":"isme21ww"}
+{"time":"2026-07-06T16:55:30.194131691Z","level":"INFO","msg":"handler: started","stream_id":"isme21ww"}
+{"time":"2026-07-06T16:55:30.194144004Z","level":"INFO","msg":"sender: started","stream_id":"isme21ww"}
+{"time":"2026-07-06T16:55:30.200974784Z","level":"INFO","msg":"Starting system monitor"}
+{"time":"2026-07-06T19:17:33.961322121Z","level":"INFO","msg":"stream: closing","id":"isme21ww"}
+{"time":"2026-07-06T19:17:33.961413563Z","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2026-07-06T19:17:33.961526445Z","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2026-07-06T19:17:33.961668632Z","level":"INFO","msg":"handler: closed","stream_id":"isme21ww"}
+{"time":"2026-07-06T19:17:33.961702295Z","level":"INFO","msg":"writer: Close: closed","stream_id":"isme21ww"}
+{"time":"2026-07-06T19:17:33.961740657Z","level":"INFO","msg":"sender: closed","stream_id":"isme21ww"}
+{"time":"2026-07-06T19:17:33.961833471Z","level":"INFO","msg":"stream: closed","id":"isme21ww"}

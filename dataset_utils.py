@@ -149,6 +149,48 @@ class NeoRLDataset(Dataset):
         )
 
 
+class AbiomedDataset(Dataset):
+    """Loads an offline Abiomed (MCS) dataset from a .npz file.
+
+    The .npz is expected to have keys: observations, actions, next_observations,
+    rewards, terminals (all produced by abiomed_env/sample_offline_dataset.py).
+    """
+
+    def __init__(
+        self, data_path: str, discount: float = 1.0, clip_to_eps: bool = True, eps: float = 1e-5
+    ):
+        data = np.load(data_path)
+        observations      = data["observations"].astype(np.float32)
+        actions           = data["actions"].astype(np.float32)
+        next_observations = data["next_observations"].astype(np.float32)
+        rewards           = data["rewards"].astype(np.float32).flatten()
+        terminals         = data["terminals"].astype(np.float32).flatten()
+
+        if clip_to_eps:
+            lim = 1 - eps
+            actions = np.clip(actions, -lim, lim)
+
+        dones_float = np.zeros_like(rewards)
+        for i in range(len(dones_float) - 1):
+            if (
+                np.linalg.norm(observations[i + 1] - next_observations[i]) > 1e-6
+                or terminals[i] == 1.0
+            ):
+                dones_float[i] = 1.0
+        dones_float[-1] = 1.0
+
+        super().__init__(
+            observations,
+            actions=actions,
+            rewards=rewards,
+            masks=1.0 - terminals,
+            dones_float=dones_float,
+            next_observations=next_observations,
+            returns_to_go=np.zeros_like(rewards),
+            size=len(observations),
+        )
+
+
 class D4RLDataset(Dataset):
     def __init__(
         self, env, discount: float = 1.0, clip_to_eps: bool = True, eps: float = 1e-5

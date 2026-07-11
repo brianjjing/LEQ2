@@ -1,0 +1,90 @@
+{
+  "os": "Linux-5.15.0-181-generic-x86_64-with-glibc2.35",
+  "python": "CPython 3.9.25",
+  "startedAt": "2026-07-09T01:42:06.953813Z",
+  "args": [
+    "--env_name=Hopper-v3-medium",
+    "--expectile",
+    "0.5",
+    "--seed",
+    "304"
+  ],
+  "program": "/home/brian/repos/LEQ2/train/train_LEQ.py",
+  "codePath": "train/train_LEQ.py",
+  "git": {
+    "remote": "https://github.com/kwanyoungpark/LEQ.git",
+    "commit": "b5f8d43577108a0e5876279a1c8ac813b830f0d7"
+  },
+  "root": "/home/brian/repos/LEQ2",
+  "host": "aysin",
+  "executable": "/home/brian/miniconda3/envs/LEQ2/bin/python",
+  "codePathLocal": "train/train_LEQ.py",
+  "cpu_count": 32,
+  "cpu_count_logical": 12,
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "gpu_count": 8,
+  "disk": {
+    "/": {
+      "total": "512174850048",
+      "used": "344217223168"
+    }
+  },
+  "memory": {
+    "total": "128000000000"
+  },
+  "cpu": {
+    "count": 32,
+    "countLogical": 12
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA GeForce RTX 4090",
+      "memoryTotal": "25757220864",
+      "cudaCores": 16384,
+      "architecture": "Ada"
+    },
+    {
+      "name": "NVIDIA GeForce RTX 4090",
+      "memoryTotal": "25757220864",
+      "cudaCores": 16384,
+      "architecture": "Ada"
+    },
+    {
+      "name": "NVIDIA GeForce RTX 4090",
+      "memoryTotal": "25757220864",
+      "cudaCores": 16384,
+      "architecture": "Ada"
+    },
+    {
+      "name": "NVIDIA GeForce RTX 4090",
+      "memoryTotal": "25757220864",
+      "cudaCores": 16384,
+      "architecture": "Ada"
+    },
+    {
+      "name": "NVIDIA GeForce RTX 4090",
+      "memoryTotal": "25757220864",
+      "cudaCores": 16384,
+      "architecture": "Ada"
+    },
+    {
+      "name": "NVIDIA GeForce RTX 4090",
+      "memoryTotal": "25757220864",
+      "cudaCores": 16384,
+      "architecture": "Ada"
+    },
+    {
+      "name": "NVIDIA GeForce RTX 4090",
+      "memoryTotal": "25757220864",
+      "cudaCores": 16384,
+      "architecture": "Ada"
+    },
+    {
+      "name": "NVIDIA GeForce RTX 4090",
+      "memoryTotal": "25757220864",
+      "cudaCores": 16384,
+      "architecture": "Ada"
+    }
+  ],
+  "cudaVersion": "13.0"
+}

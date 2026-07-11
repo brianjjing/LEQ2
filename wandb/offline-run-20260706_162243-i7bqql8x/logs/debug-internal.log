@@ -1,0 +1,15 @@
+{"time":"2026-07-06T16:22:43.931234542Z","level":"INFO","msg":"stream: starting","core version":"0.19.11","symlink path":"/home/brian/repos/LEQ2/wandb/offline-run-20260706_162243-i7bqql8x/logs/debug-core.log"}
+{"time":"2026-07-06T16:22:44.555592829Z","level":"WARN","msg":"GraphQL client is nil, skipping feature loading"}
+{"time":"2026-07-06T16:22:44.555841176Z","level":"INFO","msg":"created new stream","id":"i7bqql8x"}
+{"time":"2026-07-06T16:22:44.555877474Z","level":"INFO","msg":"stream: started","id":"i7bqql8x"}
+{"time":"2026-07-06T16:22:44.555943568Z","level":"INFO","msg":"writer: Do: started","stream_id":"i7bqql8x"}
+{"time":"2026-07-06T16:22:44.556008661Z","level":"INFO","msg":"sender: started","stream_id":"i7bqql8x"}
+{"time":"2026-07-06T16:22:44.556053896Z","level":"INFO","msg":"handler: started","stream_id":"i7bqql8x"}
+{"time":"2026-07-06T16:22:44.561573278Z","level":"INFO","msg":"Starting system monitor"}
+{"time":"2026-07-06T18:52:19.4309929Z","level":"INFO","msg":"stream: closing","id":"i7bqql8x"}
+{"time":"2026-07-06T18:52:19.431074634Z","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2026-07-06T18:52:19.43134342Z","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2026-07-06T18:52:19.431436145Z","level":"INFO","msg":"handler: closed","stream_id":"i7bqql8x"}
+{"time":"2026-07-06T18:52:19.431463707Z","level":"INFO","msg":"writer: Close: closed","stream_id":"i7bqql8x"}
+{"time":"2026-07-06T18:52:19.431499755Z","level":"INFO","msg":"sender: closed","stream_id":"i7bqql8x"}
+{"time":"2026-07-06T18:52:19.431717796Z","level":"INFO","msg":"stream: closed","id":"i7bqql8x"}

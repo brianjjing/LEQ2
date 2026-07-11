@@ -278,6 +278,8 @@ class Learner(object):
         num_repeat: int = None,
         actor_update: str = None,
         critic_update: str = None,
+        guardian: Optional[dict] = None,
+        guardian_penalty_coef: float = 0.5,
         **kwargs,
     ):
         """
@@ -383,6 +385,8 @@ class Learner(object):
         self.target_critic = target_critic
         self.target_value = target_value
         self.rng = rng
+        self.guardian = guardian
+        self.guardian_penalty_coef = guardian_penalty_coef
 
     def sample_actions(
         self, key: PRNGKey, observations: np.ndarray, temperature: float = 1.0
@@ -405,6 +409,15 @@ class Learner(object):
                 key, observations, rollout_length, self.actor, self.model, temperature
             )
         results = {k: jax.device_get(v) for (k, v) in results.items()}
+
+        if self.guardian is not None:
+            inp = np.concatenate([results["next_obss"], results["actions"]], axis=1)
+            log_probs = self.guardian["model"].score_samples(inp)
+            if hasattr(log_probs, "detach"):
+                log_probs = log_probs.detach().cpu().numpy()
+            ood_penalty = (log_probs < self.guardian["thr"]).astype(np.float32)
+            results["rewards"] = results["rewards"] - self.guardian_penalty_coef * ood_penalty
+
         return results
 
     def preprocess(self, batch):

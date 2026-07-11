@@ -268,5 +268,7 @@ def get_termination_fn(task):
         return termination_fn_neorl_walker2d
     elif "kitchen" in task:
         return termination_fn_kitchen
+    elif "abiomed" in task:
+        return lambda obs, act, next_obs: jnp.zeros((obs.shape[0], 1), dtype=bool)
     else:
-        raise jnp.zeros
+        raise ValueError(f"No termination function for task: {task}")

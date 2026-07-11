@@ -1,0 +1,15 @@
+{"time":"2026-07-06T09:46:45.816595636Z","level":"INFO","msg":"stream: starting","core version":"0.19.11","symlink path":"/home/brian/repos/LEQ2/wandb/offline-run-20260706_094645-qsfa3fgv/logs/debug-core.log"}
+{"time":"2026-07-06T09:46:46.531067166Z","level":"WARN","msg":"GraphQL client is nil, skipping feature loading"}
+{"time":"2026-07-06T09:46:46.531364686Z","level":"INFO","msg":"created new stream","id":"qsfa3fgv"}
+{"time":"2026-07-06T09:46:46.531421142Z","level":"INFO","msg":"stream: started","id":"qsfa3fgv"}
+{"time":"2026-07-06T09:46:46.53147327Z","level":"INFO","msg":"writer: Do: started","stream_id":"qsfa3fgv"}
+{"time":"2026-07-06T09:46:46.531783073Z","level":"INFO","msg":"handler: started","stream_id":"qsfa3fgv"}
+{"time":"2026-07-06T09:46:46.531812459Z","level":"INFO","msg":"sender: started","stream_id":"qsfa3fgv"}
+{"time":"2026-07-06T09:46:46.577636072Z","level":"INFO","msg":"Starting system monitor"}
+{"time":"2026-07-06T16:26:43.274714999Z","level":"INFO","msg":"stream: closing","id":"qsfa3fgv"}
+{"time":"2026-07-06T16:26:43.274779851Z","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2026-07-06T16:26:43.274990177Z","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2026-07-06T16:26:43.275069035Z","level":"INFO","msg":"handler: closed","stream_id":"qsfa3fgv"}
+{"time":"2026-07-06T16:26:43.275089594Z","level":"INFO","msg":"writer: Close: closed","stream_id":"qsfa3fgv"}
+{"time":"2026-07-06T16:26:43.275114261Z","level":"INFO","msg":"sender: closed","stream_id":"qsfa3fgv"}
+{"time":"2026-07-06T16:26:43.275312594Z","level":"INFO","msg":"stream: closed","id":"qsfa3fgv"}
