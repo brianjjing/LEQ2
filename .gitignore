@@ -1,4 +1,6 @@
 __pycache__/
+**/__pycache__/
+**/**/__pycache__/
 d4rl_ext/__pycache__/
 configs/__pycache__/
 .venv/
