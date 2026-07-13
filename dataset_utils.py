@@ -237,6 +237,46 @@ class D4RLDataset(Dataset):
         )
 
 
+class AbiomedDataset(Dataset):
+    def __init__(self, dataset_path: str, discount: float = 1.0, clip_to_eps: bool = True, eps: float = 1e-5):
+        raw = np.load(dataset_path)
+        dataset = {
+            "observations": raw["observations"].astype(np.float32),
+            "actions": raw["actions"].astype(np.float32),
+            "next_observations": raw["next_observations"].astype(np.float32),
+            "rewards": raw["rewards"].astype(np.float32),
+            "terminals": raw["terminals"].astype(np.float32),
+        }
+
+        if clip_to_eps:
+            lim = 1 - eps
+            dataset["actions"] = np.clip(dataset["actions"], -lim, lim)
+
+        dones_float = np.zeros_like(dataset["rewards"])
+        for i in range(len(dones_float) - 1):
+            if (
+                np.linalg.norm(dataset["observations"][i + 1] - dataset["next_observations"][i]) > 1e-6
+                or dataset["terminals"][i] == 1.0
+            ):
+                dones_float[i] = 1
+            else:
+                dones_float[i] = 0
+        dones_float[-1] = 1
+
+        returns_to_go = np.zeros_like(dataset["rewards"])
+
+        super().__init__(
+            dataset["observations"].astype(np.float32),
+            actions=dataset["actions"].astype(np.float32),
+            rewards=dataset["rewards"].astype(np.float32),
+            masks=1.0 - dataset["terminals"].astype(np.float32),
+            dones_float=dones_float.astype(np.float32),
+            next_observations=dataset["next_observations"].astype(np.float32),
+            returns_to_go=returns_to_go.astype(np.float32),
+            size=len(dataset["observations"]),
+        )
+
+
 class ReplayBuffer(Dataset):
     def __init__(self, observation_dim: int, action_dim: int, capacity: int):
 
