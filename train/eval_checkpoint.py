@@ -19,11 +19,25 @@ from absl import app, flags
 from ml_collections import config_flags
 
 import wrappers
-from dataset_utils import D4RLDataset
+from dataset_utils import D4RLDataset, split_into_trajectories
 from dynamics.termination_fns import get_termination_fn
 from dynamics.ensemble_model_learner import get_world_model
 from evaluation import evaluate
 from algos.leq.learner import Learner
+
+
+def normalize(dataset):
+    trajs = split_into_trajectories(
+        dataset.observations, dataset.actions, dataset.rewards,
+        dataset.masks, dataset.dones_float, dataset.next_observations,
+    )
+    def compute_returns(traj):
+        return sum(rew for _, _, rew, _, _, _ in traj)
+    trajs.sort(key=compute_returns)
+    scale = 1000.0 / (compute_returns(trajs[-1]) - compute_returns(trajs[0]))
+    dataset.rewards *= scale
+    dataset.returns_to_go *= scale
+    return scale, 0.0
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("env_name", "antmaze-medium-play-v2", "Environment name.")
@@ -46,9 +60,16 @@ config_flags.DEFINE_config_file("config", "configs/config.py")
 def make_dataset(env_name, discount):
     env = gym.make(env_name)
     dataset = D4RLDataset(env, discount)
-    if "antmaze" in env_name.lower():
+    env_lower = env_name.lower()
+    if "antmaze" in env_lower:
         dataset.rewards -= 1.0
         reward_scaler = (1.0, -1.0)
+    elif any(x in env_lower for x in ["halfcheetah", "hopper", "walker2d"]):
+        if "random" in env_lower:
+            reward_scaler = (1.0, 0.0)
+        else:
+            reward_scale, reward_bias = normalize(dataset)
+            reward_scaler = (reward_scale, reward_bias)
     else:
         reward_scaler = (1.0, 0.0)
     return dataset, reward_scaler
