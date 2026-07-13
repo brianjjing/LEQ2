@@ -137,7 +137,7 @@ def main(_):
 
     if is_neorl:
         import neorl
-        task, version, data_type = FLAGS.env_name.split("-")
+        task, version, data_type = FLAGS.env_name.split("-") #HalfCheetah-v3-medium
         env = neorl.make(task + "-" + version)
         dataset = NeoRLDataset(env, data_type, FLAGS.discount)
         reward_scaler = (1.0, 0.0)
@@ -178,9 +178,15 @@ def main(_):
     if is_neorl:
         task, version, _ = FLAGS.env_name.split("-")
         gym_env_name = task + "-" + version
+        if task == "HalfCheetah": #POTENTIAL ISSUE #1: WRONG NORMALIZATION BOUNDS.
+            max_score, min_score = 12284, -298
+        elif task == "Hopper":
+            max_score, min_score = 3294, 5
+        elif task == "Walker2d":
+            max_score, min_score = 5143, 1
         for i in range(FLAGS.eval_episodes):
             e = gym.make(gym_env_name, exclude_current_positions_from_observation=False)
-            e.get_normalized_score = lambda x, n=task: get_normalized_score_neorl(x, n)
+            e.get_normalized_score = lambda x, lo=min_score, hi=max_score: (x - lo) / (hi - lo)
             e = wrappers.EpisodeMonitor(e)
             e = wrappers.SinglePrecision(e)
             e.seed(FLAGS.seed + i)
