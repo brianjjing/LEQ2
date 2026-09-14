@@ -12,7 +12,7 @@ SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate LEQ2
 
-REPO="/home/brian/repos/LEQ2"
+REPO="$(cd "$(dirname "$SELF")/.." && pwd)"
 cd "$REPO"
 export PYTHONPATH="$REPO"
 
