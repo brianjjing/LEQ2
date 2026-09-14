@@ -74,7 +74,12 @@ flags.DEFINE_string("save_dir", "./tmp/EP/", "Tensorboard logging dir.")
 flags.DEFINE_string("wandb_key", "", "Wandb key")
 flags.DEFINE_string("dynamics", "torch", "Dynamics model")
 flags.DEFINE_string("guardian_model_name", None, "Path to a trained density model for OOD penalty")
+flags.DEFINE_enum("guardian_type", None, ["kde", "vae", "realnvp", "neuralode", "ddpm"],
+                   "Density estimator backing --guardian_model_name; required if it's set")
 flags.DEFINE_float("guardian_penalty_coef", 0.5, "OOD penalty coefficient λ")
+flags.DEFINE_integer("guardian_percentile", 1,
+                      "Percentile threshold for guardians that store multiple threshold "
+                      "candidates instead of a single saved threshold (currently: ddpm)")
 flags.DEFINE_integer("seed", 42, "Random seed.")
 flags.DEFINE_integer("eval_episodes", 10, "Number of episodes used for evaluation.")
 flags.DEFINE_integer("num_layers", 3, "number of hidden layers")
@@ -134,6 +139,151 @@ def normalize(dataset):
     dataset.rewards *= scale
     dataset.returns_to_go *= scale
     return scale, 0.0
+
+
+def load_guardian(env_name, guardian_type, guardian_model_name, guardian_percentile=1):
+    """Load a pretrained density-model guardian for the OOD rollout penalty.
+
+    Guardians are trained by whichever sibling repo owns the env: GORMPO for
+    D4RL envs, GORMPO_abiomed/cormpo for abiomed/MCS. kde/vae/realnvp/neuralode
+    expose an identical `<Class>.load_model(path) -> {"model": ..., "thr": ...}`
+    classmethod in both repos; ddpm has no such classmethod, so its OOD scorer
+    is assembled by hand from the checkpoint + scheduler.
+
+    Returns a dict with "model" (exposes .score_samples(x) -> log_probs) and
+    "thr" (float threshold), matching what algos/leq/learner.py expects.
+    """
+    import sys as _sys
+    from importlib import import_module
+
+    is_abiomed = "abiomed" in env_name
+    repo_root = os.path.abspath(os.path.join(
+        os.path.dirname(__file__), "..", "..",
+        "GORMPO_abiomed/cormpo" if is_abiomed else "GORMPO",
+    ))
+    if not os.path.isdir(repo_root):
+        raise FileNotFoundError(
+            f"Guardian loading needs the sibling repo at {repo_root}, which doesn't exist."
+        )
+    if repo_root not in _sys.path:
+        _sys.path.insert(0, repo_root)
+
+    # LEQ2 caches its own flat `common.py` in sys.modules under the name
+    # "common"; both sibling repos have a `common/` package of the same name
+    # that kde/vae/realnvp/neuralode import from. Evicting the sys.modules
+    # cache isn't enough on its own: GORMPO/common (unlike cormpo/common) has
+    # no __init__.py, so it's only a PEP 420 namespace package, and a regular
+    # module (LEQ2's common.py) anywhere on sys.path wins over a namespace
+    # package regardless of order. So also pull LEQ2's own root off sys.path
+    # for the duration of this import, then restore everything afterwards.
+    _cached = {
+        name: _sys.modules.pop(name)
+        for name in ("common", "common.buffer", "common.util")
+        if name in _sys.modules
+    }
+    _leq2_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    _orig_path = list(_sys.path)
+    _sys.path[:] = [p for p in _sys.path if os.path.abspath(p or ".") != _leq2_dir]
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    try:
+        if guardian_type == "kde":
+            mod = import_module("mbpo_kde.kde" if is_abiomed else "kde_module.kde")
+            guardian = mod.PercentileThresholdKDE.load_model(
+                guardian_model_name, use_gpu=torch.cuda.is_available(), devid=0
+            )
+        elif guardian_type == "vae":
+            mod = import_module("vae_module.vae")
+            # GORMPO's own VAE.load_model prefers metadata['hidden_dims'] over
+            # its default arg; cormpo's (abiomed) copy doesn't and always
+            # builds [256, 128], which mismatches the actual saved [256, 256]
+            # abiomed checkpoints (config/vae/real.yaml) and fails to load.
+            kwargs = {"hidden_dims": [256, 256]} if is_abiomed else {}
+            guardian = mod.VAE.load_model(guardian_model_name, **kwargs)
+        elif guardian_type == "realnvp":
+            mod = import_module("realnvp_module.realnvp")
+            guardian = mod.RealNVP.load_model(guardian_model_name)
+        elif guardian_type == "neuralode":
+            mod = import_module("neuralode_module.neural_ode_ood" if is_abiomed
+                                 else "neuralODE.neural_ode_ood")
+            # Unlike GORMPO's own, cormpo's NeuralODEOOD.load_model doesn't
+            # infer target_dim from metadata -- it's a required arg. 73 is the
+            # abiomed guardians' flattened (12 features x 6-step window + 1)
+            # scoring width, confirmed against the actual pretrained checkpoints.
+            kwargs = {"target_dim": 73} if is_abiomed else {}
+            guardian = mod.NeuralODEOOD.load_model(guardian_model_name, **kwargs)
+        elif guardian_type == "ddpm":
+            guardian = _load_ddpm_guardian(
+                repo_root, is_abiomed, guardian_model_name, guardian_percentile, device
+            )
+        else:
+            raise ValueError(
+                f"--guardian_type must be one of kde/vae/realnvp/neuralode/ddpm, got {guardian_type!r}"
+            )
+    finally:
+        _sys.path[:] = _orig_path
+        for name in ("common", "common.buffer", "common.util"):
+            _sys.modules.pop(name, None)
+        _sys.modules.update(_cached)
+
+    if not isinstance(guardian, dict):
+        guardian = {"model": guardian, "thr": getattr(guardian, "threshold", None)}
+    if guardian.get("thr") is None:
+        guardian["thr"] = guardian.get("threshold")
+    print(f"Loaded {guardian_type} guardian from {guardian_model_name} (thr={guardian['thr']:.4f})")
+    return guardian
+
+
+def _load_ddpm_guardian(repo_root, is_abiomed, guardian_model_name, percentile, device):
+    """Assemble a DDPM/diffusion OOD scorer: no load_model classmethod exists,
+    so this mirrors what ddpm_test.py / test_diffusion_ood.py do by hand.
+
+    Two save layouts exist on disk (both handled here):
+      - sparse D4RL guardians: <dir>/checkpoint.pt + <dir>/scheduler/ + a
+        sibling checkpoint_metadata.pkl with {"threshold_candidates": {pct: thr}}
+      - abiomed guardians: <dir>/checkpoint.pt only, no scheduler/, with
+        "threshold" embedded directly in the checkpoint dict
+    """
+    import sys as _sys
+    import pickle
+    from importlib import import_module
+    from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+
+    diffusion_dir = os.path.join(repo_root, "diffusion_module" if is_abiomed else "diffusion")
+    if diffusion_dir not in _sys.path:
+        _sys.path.insert(0, diffusion_dir)
+    ckpt_loader = import_module(
+        "test_diffusion_ood" if is_abiomed else "monte_carlo_sampling_unconditional"
+    )
+    ood_mod = import_module("diffusion_ood")
+    build_model_from_ckpt = (
+        ckpt_loader.load_model_from_checkpoint if is_abiomed else ckpt_loader.build_model_from_ckpt
+    )
+
+    ckpt_path = os.path.join(guardian_model_name, "checkpoint.pt")
+    if not os.path.isfile(ckpt_path):
+        ckpt_path = guardian_model_name  # standalone checkpoint file, not a directory
+    model, cfg = build_model_from_ckpt(ckpt_path, device)
+
+    scheduler_dir = os.path.join(guardian_model_name, "scheduler")
+    if os.path.isdir(scheduler_dir):
+        scheduler = DDPMScheduler.from_pretrained(scheduler_dir)
+    else:
+        scheduler = DDPMScheduler(num_train_timesteps=cfg.get("num_train_timesteps", 1000))
+
+    guardian_model = ood_mod.DiffusionOOD(model, scheduler, device=device)
+
+    raw_ckpt = torch.load(ckpt_path, map_location=device)
+    threshold = raw_ckpt.get("threshold")
+    if threshold is None:
+        meta_path = os.path.join(guardian_model_name, "checkpoint_metadata.pkl")
+        if not os.path.isfile(meta_path):
+            meta_path = f"{guardian_model_name}_metadata.pkl"
+        with open(meta_path, "rb") as f:
+            metadata = pickle.load(f)
+        threshold = metadata["threshold_candidates"][percentile]
+    guardian_model.threshold = threshold
+
+    return {"model": guardian_model, "thr": threshold}
 
 
 def make_env_and_dataset(env_name, seed, discount, model=None):
@@ -357,7 +507,12 @@ def main(_):
     print(data_batch.actions.shape)
     print("Finished loading dataset")
 
-    guardian = None  # --guardian_model_name loading isn't wired up in this script; unused unless set
+    guardian = None
+    if FLAGS.guardian_model_name:
+        assert FLAGS.guardian_type is not None, "--guardian_type is required when --guardian_model_name is set"
+        guardian = load_guardian(
+            FLAGS.env_name, FLAGS.guardian_type, FLAGS.guardian_model_name, FLAGS.guardian_percentile
+        )
 
     agent = Learner(
         FLAGS.seed,
