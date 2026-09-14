@@ -73,7 +73,6 @@ flags.DEFINE_string("dataset_path", None, "Path to .npz dataset file for custom 
 flags.DEFINE_string("save_dir", "./tmp/EP/", "Tensorboard logging dir.")
 flags.DEFINE_string("wandb_key", "", "Wandb key")
 flags.DEFINE_string("dynamics", "torch", "Dynamics model")
-flags.DEFINE_string("dataset_path", None, "Path to offline dataset .npz (MCS/Abiomed only)")
 flags.DEFINE_string("guardian_model_name", None, "Path to a trained density model for OOD penalty")
 flags.DEFINE_float("guardian_penalty_coef", 0.5, "OOD penalty coefficient λ")
 flags.DEFINE_integer("seed", 42, "Random seed.")
@@ -141,22 +140,6 @@ def make_env_and_dataset(env_name, seed, discount, model=None):
     import gym
 
     is_neorl = env_name.split("-")[1] == "v3"
-<<<<<<< HEAD
-    is_abiomed = env_name == "abiomed-v0"
-
-    if is_abiomed:
-        import sys as _sys
-        _GORMPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../GORMPO_abiomed"))
-        if _GORMPO not in _sys.path:
-            _sys.path.insert(0, _GORMPO)
-        from abiomed_env.rl_env import AbiomedRLEnvFactory
-        assert FLAGS.dataset_path is not None, \
-            "MCS requires --dataset_path pointing to a .npz offline dataset"
-        env = AbiomedRLEnvFactory.create_env(seed=seed, action_space_type="continuous")
-        dataset = AbiomedDataset(FLAGS.dataset_path, discount)
-        raw_dataset = None
-        reward_scale, reward_bias = 1.0, 0.0
-=======
     is_abiomed = "abiomed" in env_name
     if is_abiomed:
         import sys as _sys
@@ -174,7 +157,6 @@ def make_env_and_dataset(env_name, seed, discount, model=None):
         assert FLAGS.dataset_path is not None, "Must provide --dataset_path for abiomed env"
         dataset = AbiomedDataset(FLAGS.dataset_path, discount)
         raw_dataset = None
->>>>>>> 202636658ad0d1ee76e6014b2de92c0016f893af
     elif is_neorl:
         import neorl
 
@@ -323,59 +305,6 @@ def main(_):
     else:
         assert False, "Dynamics not given"
 
-<<<<<<< HEAD
-    # Load optional density-based guardian for OOD rollout penalty
-    guardian = None
-    if FLAGS.guardian_model_name:
-        import sys as _sys
-        _GORMPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../GORMPO_abiomed/cormpo"))
-        if _GORMPO not in _sys.path:
-            _sys.path.insert(0, _GORMPO)
-        # LEQ2 has a flat common.py cached in sys.modules. kde.py needs
-        # cormpo's common/ package (now has __init__.py). Pop the cached
-        # flat module so Python re-searches sys.path and finds the package.
-        _common_bak = _sys.modules.pop("common", None)
-        _common_buffer_bak = _sys.modules.pop("common.buffer", None)
-        from mbpo_kde.kde import PercentileThresholdKDE
-        if _common_bak is not None:
-            _sys.modules["common"] = _common_bak
-        if _common_buffer_bak is not None:
-            _sys.modules["common.buffer"] = _common_buffer_bak
-        guardian = PercentileThresholdKDE.load_model(
-            FLAGS.guardian_model_name, use_gpu=torch.cuda.is_available(), devid=0
-        )
-        print(f"Loaded guardian from {FLAGS.guardian_model_name} (thr={guardian['thr']:.4f})")
-
-    if FLAGS.env_name == "abiomed-v0":
-        import sys as _sys
-        _GORMPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../GORMPO_abiomed"))
-        if _GORMPO not in _sys.path:
-            _sys.path.insert(0, _GORMPO)
-        from abiomed_env.rl_env import AbiomedRLEnvFactory
-
-        class _GymCompat(gym.Wrapper):
-            """Adapt new Gymnasium API (reset→(obs,info), step→5-tuple) to
-            the old Gym API (reset→obs, step→4-tuple) that LEQ2 evaluation expects."""
-            def reset(self, **kwargs):
-                result = self.env.reset(**kwargs)
-                return result[0] if isinstance(result, tuple) else result
-            def step(self, action):
-                result = self.env.step(action)
-                if len(result) == 5:
-                    obs, reward, terminated, truncated, info = result
-                    return obs, reward, terminated or truncated, info
-                return result
-
-        eval_envs = []
-        for i in range(FLAGS.eval_episodes):
-            e = AbiomedRLEnvFactory.create_env(
-                seed=FLAGS.seed + i, action_space_type="continuous"
-            )
-            e = _GymCompat(e)
-            e = wrappers.EpisodeMonitor(e)
-            e = wrappers.SinglePrecision(e)
-            eval_envs.append(e)
-=======
     if "abiomed" in FLAGS.env_name:
         import sys as _sys
         _sys.path.insert(0, "/home/brian/repos/GORMPO_abiomed/abiomed_env")
@@ -394,7 +323,6 @@ def main(_):
             eval_env = wrappers.EpisodeMonitor(eval_env)
             eval_env = wrappers.SinglePrecision(eval_env)
             eval_envs.append(eval_env)
->>>>>>> 202636658ad0d1ee76e6014b2de92c0016f893af
     elif FLAGS.env_name.split("-")[1] == "v3":
         # NeoRL
         name, version, _ = FLAGS.env_name.split("-")
@@ -428,6 +356,8 @@ def main(_):
     print(data_batch.observations.shape)
     print(data_batch.actions.shape)
     print("Finished loading dataset")
+
+    guardian = None  # --guardian_model_name loading isn't wired up in this script; unused unless set
 
     agent = Learner(
         FLAGS.seed,
@@ -568,19 +498,10 @@ def main(_):
         )
         score.append(eval_stats["return"])
         length.append(eval_stats["length"])
-<<<<<<< HEAD
-    if run is not None:
-        run.log({f"evaluation/final_score": np.mean(score)}, step=1000000)
-        run.log({f"evaluation/final_length": np.mean(length)}, step=1000000)
-    else:
-        print(f"final_score:  {np.mean(score):.2f}")
-        print(f"final_length: {np.mean(length):.1f}")
-=======
     print("Final score:", np.mean(score), "Final length:", np.mean(length))
     if run is not None:
         run.log({f"evaluation/final_score": np.mean(score)}, step=1000000)
         run.log({f"evaluation/final_length": np.mean(length)}, step=1000000)
->>>>>>> 202636658ad0d1ee76e6014b2de92c0016f893af
 
 
 if __name__ == "__main__":
