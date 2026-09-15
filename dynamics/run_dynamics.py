@@ -1,5 +1,6 @@
 import argparse
 import os
+import pickle
 import sys
 import random
 
@@ -43,6 +44,15 @@ def get_args():
     parser.add_argument("--algo-name", type=str, default="combo")
     parser.add_argument("--task", type=str, default="hopper-medium-v2")
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--dataset-path", type=str, default=None,
+                         help="Path to a .pkl offline dataset (e.g. a sparse D4RL variant) "
+                              "to train the dynamics ensemble on, instead of the task's own "
+                              "d4rl dataset.")
+    parser.add_argument("--model-tag", type=str, default=None,
+                         help="Subdirectory name to save the dynamics ensemble under, in place "
+                              "of --task. Use this to avoid colliding with the dense D4RL "
+                              "dynamics model for the same --task when training on a custom "
+                              "--dataset-path.")
     parser.add_argument("--actor-lr", type=float, default=1e-4)
     parser.add_argument("--critic-lr", type=float, default=3e-4)
     parser.add_argument("--hidden-dims", type=int, nargs='*', default=[256, 256, 256])
@@ -109,6 +119,15 @@ def train(args=get_args()):
     '''
     is_neorl = args.task.split('-')[1] == 'v3'
 
+    # tag used for the save directory; defaults to --task, but a custom
+    # --dataset-path should use --model-tag so it doesn't collide with the
+    # dense D4RL dynamics model saved under the same --task name.
+    model_tag = args.model_tag or args.task
+    save_dir = os.path.join('./models/dynamics-ensemble/', str(args.seed), model_tag)
+    if os.path.exists(os.path.join(save_dir, "dynamics.pth")):
+        print(f"Dynamics ensemble already exists at {save_dir}, skipping training.")
+        return
+
     # create env and dataset
     if is_neorl:
         import neorl
@@ -117,7 +136,12 @@ def train(args=get_args()):
         dataset = load_neorl_dataset(env, data_type)
     else:
         env = gym.make(args.task)
-        dataset = qlearning_dataset(env)
+        if args.dataset_path:
+            with open(args.dataset_path, "rb") as f:
+                raw_dataset = pickle.load(f)
+            dataset = qlearning_dataset(env, dataset=raw_dataset)
+        else:
+            dataset = qlearning_dataset(env)
     args.obs_shape = env.observation_space.shape
     args.action_dim = np.prod(env.action_space.shape)
     args.max_action = env.action_space.high[0]
@@ -231,12 +255,12 @@ def train(args=get_args()):
         "dynamics_training_progress": "csv",
         "tb": "tensorboard"
     }
-    logger = Logger(log_dirs, output_config, wandb_logger=None)
+    logger = Logger(log_dirs, output_config)
     logger.log_hyperparameters(vars(args))
 
     dynamics.train(real_buffer.sample_all(), logger, max_epochs_since_update=5)
-    os.makedirs(os.path.join('./models/dynamics-ensemble/', str(args.seed), args.task), exist_ok = True)
-    dynamics.save(os.path.join('./models/dynamics-ensemble/', str(args.seed), args.task))
+    os.makedirs(save_dir, exist_ok=True)
+    dynamics.save(save_dir)
 
 import wandb
 if __name__ == "__main__":

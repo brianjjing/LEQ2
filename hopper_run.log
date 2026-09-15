@@ -1,0 +1,20 @@
+============================================
+LEQ expectile search on sparse Hopper (no guardian)
+  Env task:      hopper-medium-expert-v2
+  Dataset:       /public/d4rl/sparse_datasets/hopper_medium_expert_sparse_78.pkl
+  Dynamics tag:  hopper-medium-expert-v2_sparse_78
+  Seed:          42
+  Expectiles:    0.1 0.3 0.4 0.5
+  GPUs:          0 1 2 3
+  Dynamics base: /public/gormpo/models/dynamics-ensemble
+  LEQ2:          /home/ubuntu/LEQ2
+============================================
+
+Step 1/2: Verify pre-trained dynamics ensemble -> /public/gormpo/models/dynamics-ensemble/42/hopper-medium-expert-v2_sparse_78
+  Found dynamics.pth, mu.npy, std.npy. Not training -- reusing as-is.
+
+Step 2/2: LEQ expectile sweep (parallel, no guardian)
+  Launching expectile=0.1 on GPU 0 -> ./tmp/EP_sparse_expectile_search/hopper-medium-expert-v2_sparse_78/logs/expectile_0.1.log
+  Launching expectile=0.3 on GPU 1 -> ./tmp/EP_sparse_expectile_search/hopper-medium-expert-v2_sparse_78/logs/expectile_0.3.log
+  Launching expectile=0.4 on GPU 2 -> ./tmp/EP_sparse_expectile_search/hopper-medium-expert-v2_sparse_78/logs/expectile_0.4.log
+  Launching expectile=0.5 on GPU 3 -> ./tmp/EP_sparse_expectile_search/hopper-medium-expert-v2_sparse_78/logs/expectile_0.5.log
