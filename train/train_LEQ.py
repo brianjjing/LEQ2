@@ -307,6 +307,7 @@ def make_env_and_dataset(env_name, seed, discount, model=None):
         assert FLAGS.dataset_path is not None, "Must provide --dataset_path for abiomed env"
         dataset = AbiomedDataset(FLAGS.dataset_path, discount)
         raw_dataset = None
+        reward_scale, reward_bias = 1.0, 0.0
     elif is_neorl:
         import neorl
 
