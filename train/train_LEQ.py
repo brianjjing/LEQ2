@@ -320,8 +320,12 @@ def make_env_and_dataset(env_name, seed, discount, model=None):
         import d4rl_ext
 
         env = gym.make(env_name)
-        dataset = D4RLDataset(env, discount)
-        raw_dataset = env.get_dataset()
+        sparse_data = None
+        if FLAGS.dataset_path:
+            with open(FLAGS.dataset_path, "rb") as f:
+                sparse_data = pkl.load(f)
+        dataset = D4RLDataset(env, discount, raw_dataset=sparse_data)
+        raw_dataset = sparse_data if sparse_data is not None else env.get_dataset()
         env_lower = env_name.lower()
         if "antmaze" in env_lower:
             dataset.rewards -= 1.0
@@ -431,17 +435,9 @@ def main(_):
             )
         print(obs_dim, action_dim)
         termination_fn = get_termination_fn(task=FLAGS.env_name)
-        if 1 <= FLAGS.seed and FLAGS.seed <= 5:
-            print("TESTING SEEDS!")
-            model_path = os.path.join(
-                "../OfflineRL-Kit2/models/dynamics-ensemble/",
-                str(FLAGS.seed),
-                FLAGS.env_name,
-            )
-        else:
-            model_path = os.path.join(
-                "../OfflineRL-Kit2/models/dynamics-ensemble/", str(FLAGS.seed), FLAGS.env_name
-            )
+        model_path = FLAGS.load_dir or os.path.join(
+            "../OfflineRL-Kit2/models/dynamics-ensemble/", str(FLAGS.seed), FLAGS.env_name
+        )
         from dynamics.ensemble_model_learner import get_world_model
 
         env, raw_dataset, dataset, reward_scaler = make_env_and_dataset(

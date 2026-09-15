@@ -101,6 +101,7 @@ for seed in "${SEEDS[@]}"; do
         conda run --no-capture-output -n "$LEQ2_ENV" bash -c \
             "cd '$OFFLINERLKIT_DIR' && \
                 CUDA_VISIBLE_DEVICES='$CUDA_VISIBLE_DEVICES' \
+                PYTHONPATH='$OFFLINERLKIT_DIR' \
                 python run_example/run_dynamics.py \
                     --task '$TASK' --seed '$seed' \
                     --dataset-path '$DATASET_PATH'"

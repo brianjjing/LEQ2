@@ -1,5 +1,21 @@
 #!/bin/bash
 set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LEQ2_DIR="${LEQ2_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+
+# Detach from the terminal/SSH session so training survives it closing --
+# same pattern as bash_scr/run_leq_medium.sh. Re-execs itself once under
+# setsid+nohup with stdout/stderr going to a logfile; set DETACH=0 to run
+# in the foreground instead.
+if [ "${DETACH:-1}" = 1 ] && [ -z "${LEQ_DETACHED:-}" ]; then
+    mkdir -p "$LEQ2_DIR/tmp/_runs"
+    LOGFILE="$LEQ2_DIR/tmp/_runs/halfcheetah_dbg_$(date +%m%d-%H%M%S).log"
+    LEQ_DETACHED=1 setsid nohup bash "$0" "$@" >"$LOGFILE" 2>&1 </dev/null &
+    echo "detached: pid $!"
+    echo "  tail -f $LOGFILE"
+    exit 0
+fi
 # LEQ + DBG (density-based guardian) on sparse HalfCheetah-Medium-Expert
 # (72.5% sparse), 3 seeds x 5 guardians.
 #
@@ -61,8 +77,6 @@ else
     DBG_TYPES=($DBG_TYPES)
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LEQ2_DIR="${LEQ2_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 GORMPO_ROOT="${GORMPO_ROOT:-$LEQ2_DIR/../GORMPO}"
 OFFLINERLKIT_DIR="${OFFLINERLKIT_DIR:-$LEQ2_DIR/../OfflineRL-Kit2}"
 LEQ2_ENV="${LEQ2_ENV:-LEQ2}"
@@ -152,6 +166,7 @@ for seed in "${SEEDS[@]}"; do
         conda run --no-capture-output -n "$LEQ2_ENV" bash -c \
             "cd '$OFFLINERLKIT_DIR' && \
                 CUDA_VISIBLE_DEVICES='$CUDA_VISIBLE_DEVICES' \
+                PYTHONPATH='$OFFLINERLKIT_DIR' \
                 python run_example/run_dynamics.py \
                     --task '$TASK' --seed '$seed' \
                     --dataset-path '$DATASET_PATH' \

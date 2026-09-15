@@ -193,12 +193,12 @@ class AbiomedDataset(Dataset):
 
 class D4RLDataset(Dataset):
     def __init__(
-        self, env, discount: float = 1.0, clip_to_eps: bool = True, eps: float = 1e-5
+        self, env, discount: float = 1.0, clip_to_eps: bool = True, eps: float = 1e-5, raw_dataset=None
     ):
         import d4rl
         import gym
 
-        dataset = d4rl.qlearning_dataset(env)
+        dataset = d4rl.qlearning_dataset(env, dataset=raw_dataset)
 
         if clip_to_eps:
             lim = 1 - eps

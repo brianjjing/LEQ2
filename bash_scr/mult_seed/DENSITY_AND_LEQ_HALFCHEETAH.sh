@@ -81,7 +81,7 @@ for seed in "${SEEDS[@]}"; do
         echo "  Dynamics already exist, skipping."
     else
         conda run -n "$LEQ2_ENV" bash -c \
-            "cd '$OFFLINERLKIT_DIR' && python run_example/run_dynamics.py \
+            "cd '$OFFLINERLKIT_DIR' && PYTHONPATH='$OFFLINERLKIT_DIR' python run_example/run_dynamics.py \
                 --task '$TASK' --seed '$seed' --device cuda:${DEVID_DYN}"
         echo "  ✓ Dynamics training complete"
     fi
