@@ -16,9 +16,9 @@ set -e
 # GORMPO/configs/vae/gormpo_halfcheetah_medium_expert_sparse_3.yaml.
 #
 # Pipeline (per seed, in parallel):
-#   1. Train dynamics ensemble on sparse offline data  (OfflineRL-Kit2, skipped if it exists)
-#   2. Train/reuse the density-model guardian           (GORMPO)
-#   3. Train LEQ with that guardian's OOD penalty        (LEQ2)
+#   1. Read the existing transition model from the saved directory (/public/gormpo/models/dynamics-ensemble/<seed>/<model_tag>)
+#   2. Reuse the density-model guardian (from the GORMPO directory)
+#   3. Train LEQ with that guardian's OOD penalty (LEQ2)
 #
 # Usage (from LEQ2 root):
 #   bash bash_scr/leq_dbg_new/LEQ_DBG_HALFCHEETAH_VAE.sh
