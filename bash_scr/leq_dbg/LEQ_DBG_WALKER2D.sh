@@ -28,7 +28,8 @@ fi
 # GORMPO/configs/<estimator>/gormpo_walker2d_medium_expert_sparse_3.yaml
 #
 # Pipeline (per seed):
-#   1. Train dynamics ensemble on sparse offline data  (OfflineRL-Kit2, once per seed)
+#   1. Verify a PRE-TRAINED dynamics ensemble already exists (this script
+#      does NOT train dynamics)
 #   2. For each of the 5 guardians:
 #        a. Train/reuse the density-model guardian      (GORMPO)
 #        b. Train LEQ with that guardian's OOD penalty   (LEQ2)
@@ -39,13 +40,13 @@ fi
 #
 # Env overrides:
 #   SEEDS, DBG_TYPES, DEVID_KDE, DEVID_DYN, LEQ2_ENV,
-#   OFFLINERLKIT_DIR, LEQ2_DIR, GORMPO_ROOT, DATASET_PATH, GUARDIAN_ROOT
+#   DYN_BASE_DIR, LEQ2_DIR, GORMPO_ROOT, DATASET_PATH, GUARDIAN_ROOT
 
 TASK="${TASK:-walker2d-medium-expert-v2}"
 DATASET_PATH="${DATASET_PATH:-/public/d4rl/sparse_datasets/walker2d_medium_expert_sparse_73.pkl}"
 DIFFUSION_NPZ="${DIFFUSION_NPZ:-/public/d4rl/sparse_datasets/diffusion_processed/walker2d_medium_expert_sparse_73_train.npz}"
 GUARDIAN_ROOT="${GUARDIAN_ROOT:-/public/gormpo/models/walker2d_medium_expert_sparse_3}"
-DYN_TAG="${DYN_TAG:-walker2d-medium-expert-v2_sparse_73_leq_dbg}"
+DYN_TAG="${DYN_TAG:-walker2d-medium-expert-v2_sparse_73}"
 CONFIG_TAG="walker2d_medium_expert_sparse_3"  # GORMPO's config filename stem for this dataset
 
 # estimator -> reward_penalty_coef (GORMPO's tuned value for this dataset)
@@ -64,7 +65,7 @@ if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
 fi
 
 if [ -z "${SEEDS+x}" ] || [ -z "$SEEDS" ]; then
-    SEEDS=(42 123 456)
+    SEEDS=(42)
 else
     # shellcheck disable=SC2206
     SEEDS=($SEEDS)
@@ -78,7 +79,7 @@ else
 fi
 
 GORMPO_ROOT="${GORMPO_ROOT:-$LEQ2_DIR/../GORMPO}"
-OFFLINERLKIT_DIR="${OFFLINERLKIT_DIR:-$LEQ2_DIR/../OfflineRL-Kit2}"
+DYN_BASE_DIR="${DYN_BASE_DIR:-/public/gormpo/models/dynamics-ensemble}"
 LEQ2_ENV="${LEQ2_ENV:-LEQ2}"
 
 if [ ! -f "$DATASET_PATH" ]; then
@@ -89,7 +90,7 @@ fi
 echo "============================================"
 echo "LEQ + DBG: $TASK (sparse Walker2d)"
 echo "  GORMPO:        $GORMPO_ROOT"
-echo "  OfflineRL-Kit: $OFFLINERLKIT_DIR"
+echo "  Dynamics base: $DYN_BASE_DIR"
 echo "  LEQ2:          $LEQ2_DIR"
 echo "  Seeds:         ${SEEDS[*]}"
 echo "  DBG types:     ${DBG_TYPES[*]}"
@@ -157,21 +158,16 @@ for seed in "${SEEDS[@]}"; do
     echo ">>> seed = $seed"
     echo "=========================================="
 
-    # --- Dynamics ensemble: once per seed, shared across all 5 guardians ---
-    DYN_DIR="$OFFLINERLKIT_DIR/models/dynamics-ensemble/${seed}/${DYN_TAG}"
+    # --- Dynamics ensemble: PRE-TRAINED, reused as-is (never trained here) ---
+    DYN_DIR="$DYN_BASE_DIR/${seed}/${DYN_TAG}"
     echo "Dynamics ensemble -> $DYN_DIR"
-    if [ -f "$DYN_DIR/dynamics.pth" ]; then
-        echo "  Dynamics already exist, skipping."
+    if [ -f "$DYN_DIR/dynamics.pth" ] && [ -f "$DYN_DIR/mu.npy" ] && [ -f "$DYN_DIR/std.npy" ]; then
+        echo "  Found pre-trained dynamics. Not training -- reusing as-is."
     else
-        conda run --no-capture-output -n "$LEQ2_ENV" bash -c \
-            "cd '$OFFLINERLKIT_DIR' && \
-                CUDA_VISIBLE_DEVICES='$CUDA_VISIBLE_DEVICES' \
-                PYTHONPATH='$OFFLINERLKIT_DIR' \
-                python run_example/run_dynamics.py \
-                    --task '$TASK' --seed '$seed' \
-                    --dataset-path '$DATASET_PATH' \
-                    --model-tag '$DYN_TAG'"
-        echo "  Dynamics training complete"
+        echo "  ERROR: pre-trained dynamics ensemble not found at $DYN_DIR"
+        echo "    Expected files: dynamics.pth, mu.npy, std.npy"
+        echo "    This script does not train dynamics -- copy a pre-trained ensemble there first."
+        exit 1
     fi
     echo ""
 
