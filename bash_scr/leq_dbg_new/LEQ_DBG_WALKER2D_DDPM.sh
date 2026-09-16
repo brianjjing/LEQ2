@@ -16,7 +16,8 @@ set -e
 # GORMPO/configs/diffusion/gormpo_walker2d_medium_expert_sparse_3.yaml.
 #
 # Pipeline (per seed, in parallel):
-#   1. Train dynamics ensemble on sparse offline data  (OfflineRL-Kit2, skipped if it exists)
+#   1. Verify a PRE-TRAINED dynamics ensemble already exists (this script
+#      does NOT train dynamics)
 #   2. Train/reuse the density-model guardian           (GORMPO)
 #   3. Train LEQ with that guardian's OOD penalty        (LEQ2)
 #
@@ -26,7 +27,7 @@ set -e
 #   DETACH=0 bash bash_scr/leq_dbg_new/LEQ_DBG_WALKER2D_DDPM.sh   # foreground, all 3 seeds interleaved
 #
 # Env overrides:
-#   SEEDS, GPU_IDS, LEQ2_ENV, OFFLINERLKIT_DIR, LEQ2_DIR, GORMPO_ROOT,
+#   SEEDS, GPU_IDS, LEQ2_ENV, DYN_BASE_DIR, LEQ2_DIR, GORMPO_ROOT,
 #   DATASET_PATH, GUARDIAN_ROOT, REWARD_PENALTY_COEF
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,16 +38,16 @@ DBG="ddpm"
 DATASET_PATH="${DATASET_PATH:-/public/d4rl/sparse_datasets/walker2d_medium_expert_sparse_73.pkl}"
 DIFFUSION_NPZ="${DIFFUSION_NPZ:-/public/d4rl/sparse_datasets/diffusion_processed/walker2d_medium_expert_sparse_73_train.npz}"
 GUARDIAN_ROOT="${GUARDIAN_ROOT:-/public/gormpo/models/walker2d_medium_expert_sparse_3}"
-DYN_TAG="walker2d-medium-expert-v2_sparse_73_leq_dbg"
+DYN_TAG="walker2d-medium-expert-v2_sparse_73"
 CONFIG_TAG="walker2d_medium_expert_sparse_3"
 REWARD_PENALTY_COEF="${REWARD_PENALTY_COEF:-0.05}"  # GORMPO's tuned value, see header
 
 GORMPO_ROOT="${GORMPO_ROOT:-$LEQ2_DIR/../GORMPO}"
-OFFLINERLKIT_DIR="${OFFLINERLKIT_DIR:-$LEQ2_DIR/../OfflineRL-Kit2}"
+DYN_BASE_DIR="${DYN_BASE_DIR:-/public/gormpo/models/dynamics-ensemble}"
 LEQ2_ENV="${LEQ2_ENV:-LEQ2}"
 
 if [ -z "${SEEDS+x}" ] || [ -z "$SEEDS" ]; then
-    SEEDS=(42 123 456)
+    SEEDS=(42)
 else
     # shellcheck disable=SC2206
     SEEDS=($SEEDS)
@@ -97,31 +98,16 @@ run_seed() {
         return 0
     fi
 
-    # --- Dynamics ensemble ---
-    # ponytail: flock-guarded because every sibling per-estimator script for
-    # this task resolves to the SAME dynamics dir (dynamics doesn't depend on
-    # the estimator) -- without the lock, running two estimator scripts for
-    # the same task at once would both train into dynamics.pth concurrently.
-    DYN_DIR="$OFFLINERLKIT_DIR/models/dynamics-ensemble/${seed}/${DYN_TAG}"
-    DYN_LOCK="$LEQ2_DIR/tmp/_locks/dyn_${DYN_TAG}_${seed}.lock"
-    mkdir -p "$(dirname "$DYN_LOCK")"
-    (
-        flock -x 9
-        if [ -f "$DYN_DIR/dynamics.pth" ]; then
-            echo "  Dynamics already exist -> $DYN_DIR"
-        else
-            echo "  Training dynamics -> $DYN_DIR"
-            conda run --no-capture-output -n "$LEQ2_ENV" bash -c \
-                "cd '$OFFLINERLKIT_DIR' && \
-                    CUDA_VISIBLE_DEVICES='$CUDA_VISIBLE_DEVICES' \
-                    PYTHONPATH='$OFFLINERLKIT_DIR' \
-                    python run_example/run_dynamics.py \
-                        --task '$TASK' --seed '$seed' \
-                        --dataset-path '$DATASET_PATH' \
-                        --model-tag '$DYN_TAG'"
-            echo "  Dynamics training complete"
-        fi
-    ) 9>"$DYN_LOCK"
+    # --- Dynamics ensemble: PRE-TRAINED, reused as-is (never trained here) ---
+    DYN_DIR="$DYN_BASE_DIR/${seed}/${DYN_TAG}"
+    if [ -f "$DYN_DIR/dynamics.pth" ] && [ -f "$DYN_DIR/mu.npy" ] && [ -f "$DYN_DIR/std.npy" ]; then
+        echo "  Found pre-trained dynamics -> $DYN_DIR"
+    else
+        echo "  ERROR: pre-trained dynamics ensemble not found at $DYN_DIR"
+        echo "    Expected files: dynamics.pth, mu.npy, std.npy"
+        echo "    This script does not train dynamics -- copy a pre-trained ensemble there first."
+        exit 1
+    fi
 
     # --- Guardian ---
     # ponytail: same flock reasoning -- for this estimator specifically the
@@ -177,7 +163,7 @@ fi
 echo "============================================"
 echo "LEQ + DBG (ddpm): $TASK"
 echo "  GORMPO:        $GORMPO_ROOT"
-echo "  OfflineRL-Kit: $OFFLINERLKIT_DIR"
+echo "  Dynamics base: $DYN_BASE_DIR"
 echo "  LEQ2:          $LEQ2_DIR"
 echo "  Seeds:         ${SEEDS[*]}"
 echo "  GPU_IDS:       ${GPU_IDS[*]}"

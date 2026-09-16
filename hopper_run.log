@@ -18,3 +18,25 @@ Step 2/2: LEQ expectile sweep (parallel, no guardian)
   Launching expectile=0.3 on GPU 1 -> ./tmp/EP_sparse_expectile_search/hopper-medium-expert-v2_sparse_78/logs/expectile_0.3.log
   Launching expectile=0.4 on GPU 2 -> ./tmp/EP_sparse_expectile_search/hopper-medium-expert-v2_sparse_78/logs/expectile_0.4.log
   Launching expectile=0.5 on GPU 3 -> ./tmp/EP_sparse_expectile_search/hopper-medium-expert-v2_sparse_78/logs/expectile_0.5.log
+  expectile=0.1 finished (GPU 0)
+  expectile=0.3 finished (GPU 1)
+  expectile=0.4 finished (GPU 2)
+  expectile=0.5 finished (GPU 3)
+
+Collecting results -> ./tmp/EP_sparse_expectile_search/hopper-medium-expert-v2_sparse_78/results_hopper-medium-expert-v2_sparse_78.csv
+
+============================================
+Done. Results (each score = train_LEQ.py's final eval, averaged over
+--eval_episodes=10 episodes):
+expectile  final_score         final_length
+0.1        111.68427450534946  1000.0
+0.3        112.04613662786646  995.7700000000001
+0.4        111.15601046408776  1000.0
+0.5        72.00339808726054   601.26
+
+>>> BEST expectile for hopper-medium-expert-v2_sparse_78: 0.3 (final_score=112.04613662786646) <<<
+
+  Results CSV: ./tmp/EP_sparse_expectile_search/hopper-medium-expert-v2_sparse_78/results_hopper-medium-expert-v2_sparse_78.csv
+  Per-run logs: ./tmp/EP_sparse_expectile_search/hopper-medium-expert-v2_sparse_78/logs/
+  Dynamics:     /public/gormpo/models/dynamics-ensemble/42/hopper-medium-expert-v2_sparse_78/
+============================================
