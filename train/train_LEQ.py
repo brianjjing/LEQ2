@@ -213,7 +213,7 @@ def load_guardian(env_name, guardian_type, guardian_model_name, guardian_percent
             guardian = mod.NeuralODEOOD.load_model(guardian_model_name, **kwargs)
         elif guardian_type == "ddpm":
             guardian = _load_ddpm_guardian(
-                repo_root, is_abiomed, guardian_model_name, guardian_percentile, device
+                repo_root, is_abiomed, guardian_model_name, guardian_percentile, device, env_name
             )
         else:
             raise ValueError(
@@ -233,18 +233,23 @@ def load_guardian(env_name, guardian_type, guardian_model_name, guardian_percent
     return guardian
 
 
-def _load_ddpm_guardian(repo_root, is_abiomed, guardian_model_name, percentile, device):
+def _load_ddpm_guardian(repo_root, is_abiomed, guardian_model_name, percentile, device, env_name):
     """Assemble a DDPM/diffusion OOD scorer: no load_model classmethod exists,
     so this mirrors what ddpm_test.py / test_diffusion_ood.py do by hand.
 
-    Two save layouts exist on disk (both handled here):
-      - sparse D4RL guardians: <dir>/checkpoint.pt + <dir>/scheduler/ + a
-        sibling checkpoint_metadata.pkl with {"threshold_candidates": {pct: thr}}
-      - abiomed guardians: <dir>/checkpoint.pt only, no scheduler/, with
-        "threshold" embedded directly in the checkpoint dict
+    Threshold resolution mirrors GORMPO's train.py/tune_gormpo.py (NOT a
+    checkpoint_metadata.pkl sidecar, which sparse Hopper/Walker2D guardians
+    don't have on disk):
+      1. "threshold" embedded directly in the checkpoint dict, if present
+         (this is how abiomed guardians carry it).
+      2. Otherwise, the "percentile_1.0_logp" entry of
+         <repo_root>/diffusion/monte_carlo_results/<task>_unconditional_ddpm/elbo_metrics.json,
+         where <task> is env_name normalized like GORMPO does
+         (lowercased, then truncated at the first "_" or "-").
+      3. Otherwise, default to 0.0.
     """
     import sys as _sys
-    import pickle
+    import json
     from importlib import import_module
     from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
@@ -275,12 +280,24 @@ def _load_ddpm_guardian(repo_root, is_abiomed, guardian_model_name, percentile, 
     raw_ckpt = torch.load(ckpt_path, map_location=device)
     threshold = raw_ckpt.get("threshold")
     if threshold is None:
-        meta_path = os.path.join(guardian_model_name, "checkpoint_metadata.pkl")
-        if not os.path.isfile(meta_path):
-            meta_path = f"{guardian_model_name}_metadata.pkl"
-        with open(meta_path, "rb") as f:
-            metadata = pickle.load(f)
-        threshold = metadata["threshold_candidates"][percentile]
+        task_short = env_name.lower().split("_")[0].split("-")[0]
+        thr_path = os.path.join(
+            repo_root, "diffusion", "monte_carlo_results",
+            f"{task_short}_unconditional_ddpm", "elbo_metrics.json",
+        )
+        threshold = None
+        if os.path.isfile(thr_path):
+            with open(thr_path, "r") as f:
+                metrics = json.load(f)
+            threshold = metrics.get("percentile_1.0_logp")
+            if threshold is not None:
+                print(f"  Loaded DDPM threshold from {thr_path}: {threshold}")
+        if threshold is None:
+            print(
+                f"  WARNING: no threshold in checkpoint and no {thr_path} -- "
+                "using default threshold 0.0"
+            )
+            threshold = 0.0
     guardian_model.threshold = threshold
 
     return {"model": guardian_model, "thr": threshold}

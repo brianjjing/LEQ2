@@ -45,7 +45,7 @@ def _replace(model: Model, params: Params) -> Model:
     return model.replace(params=new_params)
 
 
-@partial(jax.jit, static_argnames=["rollout_length", "guardian"])
+@partial(jax.jit, static_argnames=["rollout_length"])
 def _rollout(
     key: PRNGKey,
     observations: jnp.ndarray,
@@ -53,8 +53,6 @@ def _rollout(
     actor: Model,
     model: Model,
     temperature: float = 1.0,
-    guardian: Optional[dict] = None,
-    guardian_penalty_coef: float = 0.5,
 ) -> np.ndarray:
 
     states, actions, rewards, masks = [observations], [], [], []
@@ -72,16 +70,6 @@ def _rollout(
     actions = jnp.concatenate(actions, axis=0)
     rewards = jnp.concatenate(rewards, axis=0)
     masks = jnp.concatenate(masks, axis=0)
-
-
-    if guardian is not None:
-        inp = np.concatenate([next_obss, actions], axis=1)
-        log_probs = guardian["model"].score_samples(inp)
-        if hasattr(log_probs, "detach"):
-            log_probs = log_probs.detach().cpu().numpy()
-        log_weight = (np.tanh(0.1*(-log_probs + guardian["thr"])))
-        weight = np.clip(log_weight, a_min=0, a_max=None)
-        rewards = rewards - guardian_penalty_coef * weight
 
     return {
         "obss": obss,
@@ -425,10 +413,17 @@ class Learner(object):
                 self.actor,
                 self.model,
                 temperature,
-                self.guardian,
-                self.guardian_penalty_coef,
             )
         results = {k: jax.device_get(v) for (k, v) in results.items()}
+
+        if self.guardian is not None:
+            inp = np.concatenate([results["next_obss"], results["actions"]], axis=1)
+            log_probs = self.guardian["model"].score_samples(inp)
+            if hasattr(log_probs, "detach"):
+                log_probs = log_probs.detach().cpu().numpy()
+            log_weight = np.tanh(0.1 * (-log_probs + self.guardian["thr"]))
+            weight = np.clip(log_weight, a_min=0, a_max=None)
+            results["rewards"] = results["rewards"] - self.guardian_penalty_coef * weight
 
         return results
 
