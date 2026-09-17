@@ -40,7 +40,7 @@ else
 fi
 
 if [ -z "${GPUS+x}" ] || [ -z "$GPUS" ]; then
-    GPUS=(0 1 2 3)
+    GPUS=(2 3 4 5)
 else
     # shellcheck disable=SC2206
     GPUS=($GPUS)

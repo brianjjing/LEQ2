@@ -45,7 +45,7 @@ def _replace(model: Model, params: Params) -> Model:
     return model.replace(params=new_params)
 
 
-@partial(jax.jit, static_argnames=["rollout_length"])
+@partial(jax.jit, static_argnames=["rollout_length", "guardian"])
 def _rollout(
     key: PRNGKey,
     observations: jnp.ndarray,
@@ -71,9 +71,16 @@ def _rollout(
     rewards = jnp.concatenate(rewards, axis=0)
     masks = jnp.concatenate(masks, axis=0)
 
-    # Guardian penalty is applied outside this jit-traced function (see rollout()
-    # below) -- guardian["model"] is a PyTorch/faiss/sklearn object and can't be
-    # called on the symbolic tracers that exist while jax.jit is tracing this body.
+
+    if guardian is not None:
+        inp = np.concatenate([next_obss, actions], axis=1)
+        log_probs = guardian["model"].score_samples(inp)
+        if hasattr(log_probs, "detach"):
+            log_probs = log_probs.detach().cpu().numpy()
+        log_weight = (np.tanh(0.1*(-log_probs + guardian["thr"])))
+        weight = np.clip(log_weight, a_min=0, a_max=None)
+        rewards = rewards - guardian_penalty_coef * weight
+
     return {
         "obss": obss,
         "actions": actions,
