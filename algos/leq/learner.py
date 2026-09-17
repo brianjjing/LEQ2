@@ -71,6 +71,9 @@ def _rollout(
     rewards = jnp.concatenate(rewards, axis=0)
     masks = jnp.concatenate(masks, axis=0)
 
+    # Guardian penalty is applied in rollout() below, on concrete post-device_get
+    # arrays -- guardian["model"] is a PyTorch/faiss/sklearn object and can't run
+    # on the symbolic tracers that exist while jax.jit is tracing this function.
     return {
         "obss": obss,
         "actions": actions,

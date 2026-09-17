@@ -6,10 +6,11 @@ set -e
 # of the guardian-free sparse-D4RL pipeline (guardian_penalty_coef=0 there;
 # here a real guardian is always loaded, since LEQ_DBG_MCS has no no-guardian mode).
 #
-# LEQ itself still trains on the synthetic SAC-rollout dataset, same as
-# LEQ_DBG_MCS.sh (the guardian is what saw real clinical data, when it was
-# trained -- see the NOTE in that script):
-#   $GORMPO_ABIOMED_DIR/synthetic_data/SAC_5000eps_stochastic.npz
+# LEQ itself trains on the REAL clinical dataset (unlike LEQ_DBG_MCS.sh's
+# default, which is still the synthetic SAC-rollout data):
+#   $GORMPO_ABIOMED_DIR/synthetic_data/real_train_val.npz  (built by build_real_mcs_dataset.py)
+# DYN_DIR must match -- it needs a dynamics ensemble trained on that same real
+# dataset (default dynamics-ensemble-real/, not LEQ_DBG_MCS.sh's dynamics-ensemble/).
 #
 # Pipeline:
 #   1. Verify a PRE-TRAINED dynamics ensemble already exists at DYN_DIR
@@ -78,14 +79,15 @@ OFFLINERLKIT_DIR="${OFFLINERLKIT_DIR:-$LEQ2_DIR/../OfflineRL-Kit2}"
 GUARDIAN_BASE="${GUARDIAN_BASE:-/public/gormpo/models/abiomed}"
 LEQ2_ENV="${LEQ2_ENV:-LEQ2}"
 
-DATASET_PATH="${DATASET_PATH:-$GORMPO_ABIOMED_DIR/synthetic_data/SAC_5000eps_stochastic.npz}"
+DATASET_PATH="${DATASET_PATH:-$GORMPO_ABIOMED_DIR/synthetic_data/real_train_val.npz}"
 if [ ! -f "$DATASET_PATH" ]; then
     echo "ERROR: MCS dataset not found: $DATASET_PATH"
-    echo "Set DATASET_PATH to an abiomed offline .npz"
+    echo "Set DATASET_PATH to an abiomed offline .npz, or build the real one:"
+    echo "  python $GORMPO_ABIOMED_DIR/../LEQ2/build_real_mcs_dataset.py $DATASET_PATH"
     exit 1
 fi
 
-DYN_BASE_DIR="${DYN_BASE_DIR:-$OFFLINERLKIT_DIR/models/dynamics-ensemble}"
+DYN_BASE_DIR="${DYN_BASE_DIR:-$OFFLINERLKIT_DIR/models/dynamics-ensemble-real}"
 DYN_DIR="$DYN_BASE_DIR/${SEED}/${TASK}"
 
 # Guardian checkpoint path -- same layout as guardian_path() in bash_scr/leq_dbg/LEQ_DBG_MCS.sh.
@@ -122,8 +124,12 @@ if [ -f "$DYN_DIR/dynamics.pth" ] && [ -f "$DYN_DIR/mu.npy" ] && [ -f "$DYN_DIR/
 else
     echo "ERROR: pre-trained dynamics ensemble not found at $DYN_DIR"
     echo "  Expected files: dynamics.pth, mu.npy, std.npy"
-    echo "  This script does not train dynamics -- run bash_scr/leq_dbg/LEQ_DBG_MCS.sh"
-    echo "  once first (it trains dynamics + any missing guardian for a new seed)."
+    echo "  This script does not train dynamics. LEQ_DBG_MCS.sh won't produce this either --"
+    echo "  its dynamics are trained on the synthetic dataset, into dynamics-ensemble/, not"
+    echo "  dynamics-ensemble-real/. Train one on the REAL dataset directly instead:"
+    echo "    cd $OFFLINERLKIT_DIR && python run_example/run_dynamics.py \\"
+    echo "      --task $TASK --seed $SEED --dataset-path $DATASET_PATH \\"
+    echo "      --model-base-dir $DYN_BASE_DIR/"
     exit 1
 fi
 echo ""
