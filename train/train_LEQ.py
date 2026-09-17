@@ -141,6 +141,20 @@ def normalize(dataset):
     return scale, 0.0
 
 
+class HashableGuardian:
+    """Wraps the guardian dict so it can be a jax.jit static arg (algos/leq/learner.py's
+    _rollout is @partial(jax.jit, static_argnames=[..., "guardian"]). Plain dicts aren't
+    hashable, which crashes every guardian-enabled run with TypeError: unhashable type: 'dict').
+    Identity-based hashing is correct: the guardian is loaded once and reused unchanged
+    for the life of the run, so JAX only needs to recompile once per run, same as before.
+    """
+    def __init__(self, data: dict):
+        self._data = data
+
+    def __getitem__(self, key):
+        return self._data[key]
+
+
 def load_guardian(env_name, guardian_type, guardian_model_name, guardian_percentile=1):
     """Load a pretrained density-model guardian for the OOD rollout penalty.
 
@@ -230,7 +244,7 @@ def load_guardian(env_name, guardian_type, guardian_model_name, guardian_percent
     if guardian.get("thr") is None:
         guardian["thr"] = guardian.get("threshold")
     print(f"Loaded {guardian_type} guardian from {guardian_model_name} (thr={guardian['thr']:.4f})")
-    return guardian
+    return HashableGuardian(guardian)
 
 
 def _load_ddpm_guardian(repo_root, is_abiomed, guardian_model_name, percentile, device):
