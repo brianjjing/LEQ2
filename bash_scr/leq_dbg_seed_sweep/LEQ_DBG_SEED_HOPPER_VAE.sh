@@ -137,7 +137,7 @@ for i in "${!SEEDS[@]}"; do
             PYTHONPATH='.' python train/train_LEQ.py \
             --env_name '$TASK' \
             --seed '$seed' \
-            --expectile 0.5 \
+            --expectile 0.3 \
             --dataset_path '$DATASET_PATH' \
             --load_dir '$DYN_DIR' \
             --save_dir '$SAVE_DIR/' \
