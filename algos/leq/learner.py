@@ -71,9 +71,6 @@ def _rollout(
     rewards = jnp.concatenate(rewards, axis=0)
     masks = jnp.concatenate(masks, axis=0)
 
-    # Guardian penalty is applied in rollout() below, on concrete post-device_get
-    # arrays -- guardian["model"] is a PyTorch/faiss/sklearn object and can't run
-    # on the symbolic tracers that exist while jax.jit is tracing this function.
     return {
         "obss": obss,
         "actions": actions,
@@ -117,9 +114,39 @@ def _update_fqe_jit(
     )
 
 
+def _penalize(model: Model, penalty_fn) -> Model:
+    """Guardian penalty on every imagined step (LEQ Algorithm 1, line 16):
+    r_t <- r_t - penalty_fn(s_{t+1}, a_t). Those are the rewards the critic and actor
+    updates train on; the dataset-expansion rollout (line 11) only supplies start states.
+    """
+
+    def penalized(key, observations, actions):
+        next_obs, reward, terminal, info = model(key, observations, actions)
+        # penalty_fn runs torch/faiss/sklearn on the host. stop_gradient keeps the
+        # actor's jacrev from asking the callback for a JVP (the penalty is a constant there).
+        # ponytail: one host round trip per imagined step, and the actor's jacrev pass scores
+        # again for nothing; batch per trajectory / pass it the raw model if guardian cost matters.
+        penalty = jax.pure_callback(
+            penalty_fn,
+            jax.ShapeDtypeStruct(reward.shape, jnp.float32),
+            jax.lax.stop_gradient(next_obs),
+            jax.lax.stop_gradient(actions),
+            vectorized=True,
+        )
+        return next_obs, reward - penalty, terminal, info
+
+    return penalized
+
+
 @partial(
     jax.jit,
-    static_argnames=["horizon_length", "num_repeat", "actor_update", "critic_update"],
+    static_argnames=[
+        "horizon_length",
+        "num_repeat",
+        "actor_update",
+        "critic_update",
+        "penalty_fn",
+    ],
 )
 def _update_jit(
     rng: PRNGKey,
@@ -138,9 +165,13 @@ def _update_jit(
     num_repeat: int,
     actor_update: str,
     critic_update: str,
+    penalty_fn=None,
 ) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, Model, InfoDict]:
 
     key, key2, key3, rng = jax.random.split(rng, 4)
+
+    if penalty_fn is not None:
+        model = _penalize(model, penalty_fn)
 
     ## Update actor
     if actor_update == "lambda-return":
@@ -389,8 +420,19 @@ class Learner(object):
         self.target_critic = target_critic
         self.target_value = target_value
         self.rng = rng
-        self.guardian = guardian
-        self.guardian_penalty_coef = guardian_penalty_coef
+
+        self.penalty_fn = None
+        if guardian is not None:
+
+            def penalty_fn(next_obs, actions):
+                x = np.concatenate([next_obs, actions], axis=-1)
+                log_probs = guardian["model"].score_samples(x.reshape(-1, x.shape[-1]))
+                if hasattr(log_probs, "detach"):
+                    log_probs = log_probs.detach().cpu().numpy()
+                weight = np.clip(np.tanh(0.1 * (guardian["thr"] - np.asarray(log_probs))), 0, None)
+                return (guardian_penalty_coef * weight).reshape(x.shape[:-1]).astype(np.float32)
+
+            self.penalty_fn = penalty_fn
 
     def sample_actions(
         self, key: PRNGKey, observations: np.ndarray, temperature: float = 1.0
@@ -418,15 +460,6 @@ class Learner(object):
                 temperature,
             )
         results = {k: jax.device_get(v) for (k, v) in results.items()}
-
-        if self.guardian is not None:
-            inp = np.concatenate([results["next_obss"], results["actions"]], axis=1)
-            log_probs = self.guardian["model"].score_samples(inp)
-            if hasattr(log_probs, "detach"):
-                log_probs = log_probs.detach().cpu().numpy()
-            log_weight = np.tanh(0.1 * (-log_probs + self.guardian["thr"]))
-            weight = np.clip(log_weight, a_min=0, a_max=None)
-            results["rewards"] = results["rewards"] - self.guardian_penalty_coef * weight
 
         return results
 
@@ -484,6 +517,7 @@ class Learner(object):
             self.num_repeat,
             self.actor_update,
             self.critic_update,
+            penalty_fn=self.penalty_fn,
         )
 
         self.rng = new_rng

@@ -206,3 +206,64 @@ No repo code changed. Everything lives on `/data` (root disk is 96% full); logs 
 | Logs | `/data/leq2_runs/mcs_nodbg_expectile_seed42/logs/`, symlinked into `tmp/EP_expectile_search/` |
 | Cap at 200k | `stop_at_step.sh` (in the run dir) terminates each run's session once `42_200000.pkl` is completely written. Not `--max_steps 200000`: that also feeds the actor's cosine LR schedule (`algos/leq/learner.py:336`), so the checkpoint would differ from a 1M-step run's 200k (e.g. the 0.5 baseline's). Side effect: the end-of-training "Final score" eval never runs. Log: `logs/stop_at_200k.log` |
 | Tested | dummy-run test: partial checkpoint ignored, complete checkpoint stops only that session, stale PID refused |
+
+# Change log: LEQ + DBG on real MCS data, expectile 0.4, seed 42, all 5 guardians (2026-09-23)
+
+## Code change: `algos/leq/learner.py` `rollout()`
+Guardian scoring now runs in 8192-row chunks, not one `score_samples` call on all ~250k rollout rows. This is the same fix as OfflineRL-Kit2's `_ChunkedScorer` (COMBO, `--guardian-chunk-size`).
+- **Why:** the one-shot call OOM'd neuralode (12.3 GiB allocated) in the Sep 17 expectile search. realnvp's `score_samples` also has no `no_grad`, so it held an autograd graph over all rows.
+- **Check** (seed-42 guardians, rows from `real_train_val.npz`, chunked vs one-shot):
+
+| guardian | result |
+|---|---|
+| kde | identical |
+| realnvp | differs by at most 2e-2 (float noise) |
+| vae, ddpm | stochastic scorers; for vae, chunked-vs-one-shot mean abs error was 1.06 vs its own run-to-run 1.03 |
+| neuralode | repeat calls on the same batch are identical; dopri5 picks step sizes per batch, so chunked vs one-shot differs by up to 2.7 on a logp of about 80 |
+
+## Runs
+- **Flags:** the same as `bash_scr/expectile_search/LEQ_EXPECTILE_MCS.sh` (`real_train_val.npz`, `dynamics-ensemble-real/42/abiomed-v0`, its per-guardian coef table, `--eval_episodes 10 --debug`), with `--expectile 0.4 --seed 42`, plus `XLA_PYTHON_CLIENT_PREALLOCATE=false PYTHONUNBUFFERED=1`.
+- **Why not the script:** its fixed save dir, `tmp/EP_dbg_expectile_search/<g>/`, already holds the Sep 17-18 kde/vae/realnvp `42/0.4` checkpoints and logs, and a rerun would overwrite them.
+
+| guardian | coef | GPU |
+|---|---|---|
+| neuralode | 0.2 | 5 |
+| kde | 0.2 | 3 |
+| realnvp | 0.2 | 1 |
+| ddpm | 0.4 | 4 |
+| vae | 0.1 | 7 |
+
+- **Outputs:** `/data/leq2_runs/mcs_dbg_real_e0.4_seed42/<guardian>/{models,videos}`. Logs are in `.../logs/`, symlinked into `tmp/EP_dbg_mcs_real_e0.4/`.
+- **Stop at 200k:** `stop_at_step.sh`, copied from the no-DBG run dir, runs once per job. It keeps the 1M-step LR schedule, so the 200k checkpoints are comparable to the no-DBG e0.4 run. The stopper logs are `logs/stop_at_200k_<guardian>.log`.
+
+## Outcome
+- **Finished:** realnvp, vae, kde and neuralode reached 200k (at 10:27, 10:45, 10:55 and 14:12 UTC). Their `42_200000.pkl` files are byte-identical (md5 `0e14301f…`), to each other and to the Sep 17-18 kde/realnvp/vae `42/0.4` checkpoints. Eval return is identical at every step: 50k −12.43, 100k −23.72, 150k −46.93, 200k −42.85.
+- **Cause:** the guardian penalty never affects training. `Learner.rollout()` only penalizes the rewards stored in `rollout_dataset`. `lambda_update_q` (`algos/leq/critic.py`) and `DPG_lambda_update_actor` (`algos/leq/actor.py`) read only `model_batch.observations` and take their rewards from the dynamics model. Every LEQ+DBG run so far is effectively plain LEQ.
+- **ddpm:** killed at about step 42k (17:00 UTC), because it can't produce a different result. Its only checkpoint is `42_0.pkl`.
+
+# Change log: guardian penalty moved into LEQ's imagined rollouts (2026-09-23)
+
+## Code change
+The penalty now goes where LEQ's Algorithm 1 samples the rewards it trains on: line 16, the imagined rollouts. The old placement was line 11, the dataset expansion; line 9 keeps only the states from that rollout.
+- **`algos/leq/learner.py` `_penalize()`:** inside `_update_jit`, the dynamics model is wrapped so every imagined reward becomes r − coef·clip(tanh(0.1·(thr − log p(s′, a))), 0), the same formula as before. This covers all three `--actor_update`/`--critic_update` modes. The guardian runs on the host through `jax.pure_callback`. Its inputs are `stop_gradient`ed, so under the actor's `jacrev` the penalty is a constant. The actor feels the penalty through the λ-return values and the penalized critic, not through ∂penalty/∂a.
+- **`Learner`:** builds the host-side `penalty_fn` from the guardian dict. The dataset-expansion rollout and evaluation still use the raw model.
+- **Removed:** the penalty in `Learner.rollout()` (including this morning's 8192-row chunking), and `HashableGuardian` in `train/train_LEQ.py`. The guardian is no longer a jit argument.
+- **Unchanged:** the `--guardian_*` flags and every `bash_scr/` script.
+- **Test:** `test_guardian_penalty.py` checks that a zero penalty leaves one update bit-identical and a non-zero penalty changes it. It fails on the old code and passes for all three update modes. Run it with `JAX_PLATFORMS=cpu conda run -n LEQ2 python test_guardian_penalty.py` (about 45 s).
+
+## Smoke test
+MCS real data, e0.4, seed 42, 1000 steps (`/data/leq2_runs/dbg_fix_smoke/`).
+
+| guardian | coef | it/s | checkpoints at 500 and 1000 | critic `reward_model`, mean over steps 100–1000 |
+|---|---|---|---|---|
+| none | – | 61–66 | – | +0.041 |
+| vae | 0.1 | 17–27 | all distinct | −0.026 |
+| kde | 0.2 | ~8.7 | all distinct | −0.031 |
+| realnvp | 0.2 | ~5 | all distinct | −0.156 (≈ coef: nearly every imagined step gets w ≈ 1) |
+| neuralode | 0.2 | ~0.024 (42 s/step) | stopped at step 5 | – |
+| ddpm | 0.4 | ~0.04 (25 s/step) | stopped at step 10 | – |
+
+- **neuralode / ddpm:** at these rates, 200k steps would take about 97 and 58 days. Batching per trajectory and skipping the `jacrev` pass would give at most about 15×. These two need a JAX-side stand-in for the guardian, such as an MLP fit to its scores.
+
+- **Coefs:** the per-guardian coefficients were picked while the penalty had no effect, so they are untuned.
+- **Cost:** 30 host round trips per update step (10 imagined steps × critic, actor forward, actor `jacrev`). The `jacrev` pass's scoring is wasted, and batching per trajectory would cut the round trips by 10×; see the `ponytail:` note in `_penalize`.
