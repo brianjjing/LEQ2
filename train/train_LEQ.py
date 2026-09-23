@@ -669,6 +669,10 @@ def main(_):
             with open(os.path.join(model_path, f"{FLAGS.seed}_{i}.pkl"), "wb") as F:
                 pkl.dump(params, F)
 
+    if "abiomed" in FLAGS.env_name:
+        for e in eval_envs:
+            e.unwrapped.max_steps = 1000
+
     score, length = [], []
     for i in range(10):
         eval_stats = evaluate(

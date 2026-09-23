@@ -18,13 +18,15 @@ set -e
 #   2. Verify a PRE-TRAINED guardian (GUARDIAN_TYPE, default realnvp) already
 #      exists (this script does NOT train the guardian either -- run
 #      bash_scr/leq_dbg/LEQ_DBG_MCS.sh once first if one is missing).
-#   3. Reuse both to run LEQ once per expectile value in EXPECTILES, ALL IN
-#      PARALLEL, one job per GPU, with that guardian's OOD penalty applied.
+#   3. Reuse both to run LEQ once per expectile value in EXPECTILES, in
+#      BATCH_SIZE-wide batches (default 2) -- e.g. with 4 expectiles and
+#      BATCH_SIZE=2, expectiles 1-2 run concurrently, then 3-4, so the sweep
+#      takes ~2x one run's time instead of 4x (fully sequential) or 1x
+#      (all 4 at once, which is what OOM'd before).
 #
-# GPU layout (fixed): GPUs 0-3, one per expectile value. NOTE: this overlaps
-# with LEQ_EXPECTILE_HOPPER.sh / LEQ_EXPECTILE_WALKER2D.sh -- don't run those
-# at the same time as this unless you override GPUS below
-# (LEQ_EXPECTILE_HALFCHEETAH.sh uses GPUs 4-7 and is safe alongside this).
+# GPU: GPUS is reused/cycled across batches (one entry is enough -- e.g.
+# GPUS=6 puts the whole sweep on GPU 6, BATCH_SIZE concurrent jobs and all).
+# Pass BATCH_SIZE entries to give each concurrent job in a batch its own GPU.
 #
 # Usage (from LEQ2 root):
 #   bash bash_scr/expectile_search/LEQ_EXPECTILE_MCS.sh
@@ -67,10 +69,12 @@ else
     GPUS=($GPUS)
 fi
 
-if [ "${#GPUS[@]}" -lt "${#EXPECTILES[@]}" ]; then
-    echo "ERROR: need at least ${#EXPECTILES[@]} GPUs in GPUS, got ${#GPUS[@]}"
+if [ "${#GPUS[@]}" -lt 1 ]; then
+    echo "ERROR: GPUS is empty"
     exit 1
 fi
+
+BATCH_SIZE="${BATCH_SIZE:-2}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LEQ2_DIR="${LEQ2_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
@@ -152,42 +156,44 @@ else
 fi
 echo ""
 
-echo "Step 3/3: LEQ expectile sweep (parallel, with $GUARDIAN_TYPE guardian)"
-declare -A PIDS
-declare -A GPU_FOR_EXPECTILE
-for i in "${!EXPECTILES[@]}"; do
-    expectile="${EXPECTILES[$i]}"
-    gpu="${GPUS[$i]}"
-    GPU_FOR_EXPECTILE[$expectile]="$gpu"
-    logfile="$LOG_DIR/expectile_${expectile}.log"
-    echo "  Launching expectile=$expectile on GPU $gpu -> $logfile"
-    conda run --no-capture-output -n "$LEQ2_ENV" bash -c \
-        "cd '$LEQ2_DIR' && \
-            CUDA_VISIBLE_DEVICES='$gpu' \
-            PYTHONPATH='.' python train/train_LEQ.py \
-            --env_name '$TASK' \
-            --seed '$SEED' \
-            --expectile '$expectile' \
-            --dataset_path '$DATASET_PATH' \
-            --load_dir '$DYN_DIR' \
-            --guardian_model_name '$GUARDIAN_PATH' \
-            --guardian_type '$GUARDIAN_TYPE' \
-            --guardian_penalty_coef '$GUARDIAN_PENALTY_COEF' \
-            --eval_episodes 10 \
-            --save_dir '$SAVE_DIR/' \
-            --debug" > "$logfile" 2>&1 &
-    PIDS[$expectile]=$!
-done
-
+echo "Step 3/3: LEQ expectile sweep ($BATCH_SIZE at a time, with $GUARDIAN_TYPE guardian)"
 FAILED_EXPECTILES=()
-for expectile in "${EXPECTILES[@]}"; do
-    if wait "${PIDS[$expectile]}"; then
-        echo "  expectile=$expectile finished (GPU ${GPU_FOR_EXPECTILE[$expectile]})"
-    else
-        status=$?
-        echo "  WARNING: expectile=$expectile FAILED (exit $status, GPU ${GPU_FOR_EXPECTILE[$expectile]}) -- see $LOG_DIR/expectile_${expectile}.log"
-        FAILED_EXPECTILES+=("$expectile")
-    fi
+n="${#EXPECTILES[@]}"
+for ((start=0; start<n; start+=BATCH_SIZE)); do
+    declare -A PIDS=()
+    declare -A GPU_FOR=()
+    for ((j=start; j<start+BATCH_SIZE && j<n; j++)); do
+        expectile="${EXPECTILES[$j]}"
+        gpu="${GPUS[$((j % ${#GPUS[@]}))]}"
+        GPU_FOR[$expectile]="$gpu"
+        logfile="$LOG_DIR/expectile_${expectile}.log"
+        echo "  Launching expectile=$expectile on GPU $gpu -> $logfile"
+        conda run --no-capture-output -n "$LEQ2_ENV" bash -c \
+            "cd '$LEQ2_DIR' && \
+                CUDA_VISIBLE_DEVICES='$gpu' \
+                PYTHONPATH='.' python train/train_LEQ.py \
+                --env_name '$TASK' \
+                --seed '$SEED' \
+                --expectile '$expectile' \
+                --dataset_path '$DATASET_PATH' \
+                --load_dir '$DYN_DIR' \
+                --guardian_model_name '$GUARDIAN_PATH' \
+                --guardian_type '$GUARDIAN_TYPE' \
+                --guardian_penalty_coef '$GUARDIAN_PENALTY_COEF' \
+                --eval_episodes 10 \
+                --save_dir '$SAVE_DIR/' \
+                --debug" > "$logfile" 2>&1 &
+        PIDS[$expectile]=$!
+    done
+    for expectile in "${!PIDS[@]}"; do
+        if wait "${PIDS[$expectile]}"; then
+            echo "  expectile=$expectile finished (GPU ${GPU_FOR[$expectile]})"
+        else
+            status=$?
+            echo "  WARNING: expectile=$expectile FAILED (exit $status, GPU ${GPU_FOR[$expectile]}) -- see $LOG_DIR/expectile_${expectile}.log"
+            FAILED_EXPECTILES+=("$expectile")
+        fi
+    done
 done
 echo ""
 
