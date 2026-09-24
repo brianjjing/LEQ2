@@ -265,5 +265,47 @@ MCS real data, e0.4, seed 42, 1000 steps (`/data/leq2_runs/dbg_fix_smoke/`).
 
 - **neuralode / ddpm:** at these rates, 200k steps would take about 97 and 58 days. Batching per trajectory and skipping the `jacrev` pass would give at most about 15×. These two need a JAX-side stand-in for the guardian, such as an MLP fit to its scores.
 
+## Confirmed with real guardians
+One real update, run twice from the same state, with and without the penalty. The critic's mean imagined reward drops by exactly the penalty obtained by scoring the critic's own imagined (s′, a) pairs with the guardian directly.
+
+| guardian | reward_model without → with penalty | drop | guardian's own mean penalty | steps penalized |
+|---|---|---|---|---|
+| kde | +0.0816 → +0.0080 | 0.073639 | 0.073639 | 88% |
+| vae | +0.0816 → +0.0153 | 0.066313 | 0.066213 (its scorer is random) | 84% |
+| realnvp | +0.0816 → −0.1156 | 0.197153 | 0.197153 | 99% |
+
+# Change log: LEQ vs LEQ + fixed DBG, MCS real data, expectile 0.4, seed 42 (2026-09-23)
+- **Flags:** the same as this morning's `mcs_dbg_real_e0.4_seed42` batch (real data, `dynamics-ensemble-real/42`, the same per-guardian coefs, `--eval_episodes 10 --debug`), now on the fixed code, plus one run with no guardian. `PYTHONPATH=. XLA_PYTHON_CLIENT_PREALLOCATE=false PYTHONUNBUFFERED=1`.
+- **Outputs:** `/data/leq2_runs/mcs_dbg_fixed_e0.4_seed42/<run>/`. Logs are in `.../logs/`, symlinked into `tmp/EP_dbg_mcs_fixed_e0.4/`. `launch.sh` in the run dir reproduces any single run.
+- **Stop at 200k:** `stop_at_step.sh` stops each run at 200k without shortening the 1M-step schedule; logs are `logs/stop_at_200k_<run>.log`.
+- **Check:** the no-guardian code path is unchanged, so `nodbg`'s 200k checkpoint should match this morning's md5 `0e14301f…`.
+
+| run | coef | GPU | expected time to 200k at the smoke-test rates |
+|---|---|---|---|
+| nodbg | – | 6 | ~1 h |
+| vae | 0.1 | 7 | ~2.5 h |
+| kde | 0.2 | 4 | ~6.5 h |
+| realnvp | 0.2 | 1 (another tenant at 100% util) | ~11 h+ |
+| ddpm | 0.4 | 3 | ~58 days |
+| neuralode | 0.2 | 5 | ~97 days |
+
+- **ddpm, neuralode:** killed at 20:28 UTC, at steps ~29 and ~21, at Brian's request. Too slow, and their penalties aren't informative; see below.
+- **nodbg:** reached 200k at 21:04 UTC. `42_200000.pkl` has md5 `0e14301f…`, byte-identical to this morning's e0.4 "DBG" checkpoints. Its evals are identical too (−12.43, −23.72, −46.93, −42.85 at 50k–200k). So the fix leaves the no-guardian path unchanged, and this morning's DBG runs were exactly no-guardian LEQ.
+
+## Guardian weights on the same imagined (s′, a)
+2,560 rows from the critic's first-update imagination. w = clip(tanh(0.1·(thr − log p)), 0).
+
+| guardian | mean w | w > 0 | w > 0.9 |
+|---|---|---|---|
+| kde | 0.37 | 88% | 0% |
+| vae | 0.66 | 84% | 45% |
+| realnvp | 0.99 | 99% | 98% |
+| neuralode | 1.00 | 99.8% | 99.8% |
+| ddpm | 0.00 | 0% | 0% (thr = −1,206,903; nothing falls below it) |
+
+- **Correlation of w:** kde–vae 0.85. All other pairs 0.08–0.29.
+- **Meaning:** only kde and vae give graded, per-sample penalties. realnvp and neuralode act as a near-constant −coef shift on every imagined reward, and ddpm never penalizes.
+- **Next check:** score the guardians on the real dataset's own (s′, a). About 1% should be flagged at the 1st-percentile threshold; if far more are, LEQ2 is feeding the guardian the wrong input format.
+
 - **Coefs:** the per-guardian coefficients were picked while the penalty had no effect, so they are untuned.
 - **Cost:** 30 host round trips per update step (10 imagined steps × critic, actor forward, actor `jacrev`). The `jacrev` pass's scoring is wasted, and batching per trajectory would cut the round trips by 10×; see the `ponytail:` note in `_penalize`.
